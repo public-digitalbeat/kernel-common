@@ -85,7 +85,7 @@
 			reusable;
 			size = <0x0 0x1000000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3f000000 0x0 0x1000000>;
+			alloc-ranges = <0x0 0x7e000000 0x0 0x1000000>;
 		};
 
 		/*dsp_shm_reserved:linux,dsp_shm {      */
@@ -95,11 +95,10 @@
 		/*};*/
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3e800000 0x0 0x800000>;
+			reg = <0x0 0x3e800000 0x0 0x800000>;
 		};
 
 		codec_mm_cma:linux,codec_mm_cma {
@@ -647,7 +646,7 @@
 		compatible = "amlogic, dolby_vision_t7";
 		dev_name = "aml_amdolby_vision_driver";
 		status = "disabled";
-		tv_mode = <1>;/*1:enabel ;0:disable*/
+		tv_mode = <1>;/*1:enable ;0:disable*/
 	};
 
     /* SMC */
@@ -1862,9 +1861,9 @@
 
 &amlvecm {
 	status = "disabled";
-	gamma_en = <0>;/*1:enabel ;0:disable*/
-	wb_en = <0>;/*1:enabel ;0:disable*/
-	cm_en = <0>;/*1:enabel ;0:disable*/
+	gamma_en = <0>;/*1:enable ;0:disable*/
+	wb_en = <0>;/*1:enable ;0:disable*/
+	cm_en = <0>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	vlock_mode = <0x8>;

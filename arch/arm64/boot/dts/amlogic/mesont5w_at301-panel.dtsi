@@ -4,12 +4,12 @@
  */
 
 / {
-	lcd {
+	lcd:lcd {
 		compatible = "amlogic, lcd-t5w";
 		status = "okay";
 		index = <0>;
 		mode = "tv";
-		fr_auto_policy = <0>; /* 0=disable, 1=60/50hz, 2=60/50/48hz */
+		fr_auto_policy = <1>; /* 0=disable, 1=60/50hz, 2=60/50/48hz */
 		key_valid = <1>;
 		clocks = <&clkc CLKID_CLK81_VCLK2_ENCL
 			&clkc CLKID_CLK81_VCLK2_VENCL
@@ -31,7 +31,9 @@
 		interrupt-names = "vsync","vsync2","vbyone","tcon";
 		pinctrl-names = "vbyone","vbyone_off",
 				"tcon_p2p","tcon_p2p_usit","tcon_p2p_off",
-				"tcon_mlvds","tcon_mlvds_off";
+				"tcon_mlvds","tcon_mlvds_off",
+				"ST6451D06-3","ST6451D06-3_off",
+				"ST5461D18-2","ST5461D18-2_off";
 		pinctrl-0 = <&lcd_vbyone_a_pins>;
 		pinctrl-1 = <&lcd_vbyone_a_off_pins>;
 		pinctrl-2 = <&lcd_tcon_p2p_pins>;
@@ -39,6 +41,10 @@
 		pinctrl-4 = <&lcd_tcon_p2p_off_pins>;
 		pinctrl-5 = <&lcd_tcon_mlvds_pins>;
 		pinctrl-6 = <&lcd_tcon_mlvds_off_pins>;
+		pinctrl-7 = <&ST6451D06_3_pins>;
+		pinctrl-8 = <&ST6451D06_3_off_pins>;
+		pinctrl-9 = <&ST5461D18_2_pins>;
+		pinctrl-10 = <&ST5461D18_2_off_pins>;
 		pinctrl_version = <2>; /* for uboot */
 		memory-region = <&lcd_tcon_reserved>;
 
@@ -412,6 +418,17 @@
 				0xff 0 0 0>; /*ending*/
 			backlight_index = <0xff>;
 		};
+
+		ports {
+			port {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				lcd0_to_drm: endpoint@0 {
+					reg = <0>;
+					remote-endpoint = <0>;
+				};
+			};
+		};
 	};
 
 	lcd_extern{
@@ -607,7 +624,7 @@
 			ldim_pwm_port = "PWM_VS";
 			ldim_pwm_attr = <1  /* pol */
 				2 /*freq(pwm:Hz, pwm_vs:multiple of vs)*/
-				2>;/*default duty(%)*/
+				50>;/*default duty(%)*/
 			spi_bus_num = <2>;
 			spi_chip_select = <0>;
 			spi_max_frequency = <1000000>; /* unit: hz */
@@ -622,7 +639,7 @@
 				/* ldim_dev-gpios index, 0xff=invalid */
 			spi_write_check = <0>; /* 0=disable, 1=enable */
 
-			dim_max_min = <0xfff 0x0>; /* dim_max, dim_min */
+			dim_max_min = <0xfff 0x10>; /* dim_max, dim_min */
 			chip_count = <3>;
 			ldim_zone_mapping = <
 				37 38 39 40 41
@@ -638,8 +655,8 @@
 			ldim_bl_profile_k_bits = <
 				3487 24>; /*profile_k, profile_bits*/
 			ldim_bl_profile_path =
-				"/mnt/vendor/odm_ext/etc/tvconfig/
-				panel/tcon/HV650QUB-F70_LDIM/bl_profile.bin";
+				"/mnt/vendor/odm_ext/etc/tvconfig/\
+panel/tcon/HV650QUB-F70_LDIM/bl_profile.bin";
 
 			cmd_size = <0xff>;
 			/* init: (type, data...) */
@@ -752,7 +769,7 @@
 			ldim_pwm_port = "PWM_VS";
 			ldim_pwm_attr = <1  /* pol */
 				1 /*freq(pwm:Hz, pwm_vs:multiple of vs)*/
-				2>;/*default duty(%)*/
+				50>;/*default duty(%)*/
 			spi_bus_num = <2>;
 			spi_chip_select = <0>;
 			spi_max_frequency = <3000000>; /* unit: hz */
@@ -774,8 +791,12 @@
 			ldim_bl_profile_k_bits = <
 				2827 24>; /*profile_k, profile_bits*/
 			ldim_bl_profile_path =
-				"/mnt/vendor/odm_ext/etc/tvconfig/
-				panel/UHD_2RG_LDIM_BLMCU/bl_profile.bin";
+				"/mnt/vendor/odm_ext/etc/tvconfig/\
+panel/UHD_2RG_LDIM_BLMCU/bl_profile.bin";
+
+			mcu_header = <0x55AA0014>;
+			mcu_dim =<0x0000FF4D>;	/*reserve+type+adim+pdim*/
+			/*type: 0: 3bytes(old spec), 1:6bytes(new spec)*/
 
 			ldim_cus_param = < /* maximum = 32 x 4 bytes*/
 				11

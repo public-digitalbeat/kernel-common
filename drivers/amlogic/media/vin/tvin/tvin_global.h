@@ -466,6 +466,8 @@ struct tvin_spd_data_s {
 	u8 length;
 	u8 checksum;
 	//u8 ieee_oui[3]; //data[0:2]
+	//data[5]:bit2 bit3 is freesync type,1:VDIN_VRR_FREESYNC
+	//2:VDIN_VRR_FREESYNC_PREMIUM 3:VDIN_VRR_FREESYNC_PREMIUM_PRO
 	u8 data[28];
 };
 
@@ -512,7 +514,7 @@ struct tvin_sig_property_s {
 	struct tvin_hdr_info_s hdr_info;
 	struct tvin_dv_vsif_s dv_vsif;/*dolby vsi info*/
 	struct tvin_dv_vsif_raw_s dv_vsif_raw;
-	u8 dolby_vision;/*is signal dolby version*/
+	u8 dolby_vision;/*is signal dolby version 1:vsif 2:emp */
 	bool low_latency;/*is low latency dolby mode*/
 	u8 fps;
 	unsigned int skip_vf_num;/*skip pre vframe num*/

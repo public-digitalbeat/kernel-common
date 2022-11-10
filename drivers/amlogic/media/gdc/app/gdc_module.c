@@ -21,8 +21,13 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/dma-buf.h>
 #include <linux/pm_runtime.h>
-
 #include <linux/of_address.h>
+#include <linux/timer.h>
+
+#ifdef CONFIG_AMLOGIC_FREERTOS
+#include <linux/amlogic/freertos.h>
+#endif
+
 #include <api/gdc_api.h>
 #include "system_log.h"
 
@@ -38,6 +43,18 @@
 #include "gdc_dmabuf.h"
 #include "gdc_wq.h"
 
+#ifdef CONFIG_AMLOGIC_FREERTOS
+struct timer_data_s {
+	u32 dev_type;
+	struct meson_gdc_dev_t *gdc_dev;
+	struct timer_list timer;
+	struct work_struct work;
+};
+
+static struct timer_data_s timer_data[HW_TYPE];
+#define TIMER_MS (2000)
+#endif
+
 int gdc_log_level;
 int gdc_smmu_enable;
 struct gdc_manager_s gdc_manager;
@@ -51,7 +68,8 @@ static struct gdc_device_data_s arm_gdc_clk2 = {
 	.dev_type = ARM_GDC,
 	.clk_type = CORE_AXI,
 	.core_cnt = 1,
-	.smmu_support = 0
+	.smmu_support = 0,
+	.fw_version = ARMGDC_FW_V1
 };
 
 static struct gdc_device_data_s arm_gdc = {
@@ -59,14 +77,16 @@ static struct gdc_device_data_s arm_gdc = {
 	.clk_type = MUXGATE_MUXSEL_GATE,
 	.ext_msb_8g = 1,
 	.core_cnt = 1,
-	.smmu_support = 0
+	.smmu_support = 0,
+	.fw_version = ARMGDC_FW_V1
 };
 
 static struct gdc_device_data_s aml_gdc = {
 	.dev_type = AML_GDC,
 	.clk_type = MUXGATE_MUXSEL_GATE,
 	.core_cnt = 1,
-	.smmu_support = 0
+	.smmu_support = 0,
+	.fw_version = AMLGDC_FW_V1
 };
 
 static struct gdc_device_data_s aml_gdc_v2 = {
@@ -75,7 +95,18 @@ static struct gdc_device_data_s aml_gdc_v2 = {
 	.bit_width_ext = 1,
 	.gamma_support = 1,
 	.core_cnt = 3,
-	.smmu_support = 1
+	.smmu_support = 1,
+	.fw_version = AMLGDC_FW_V2
+};
+
+static struct gdc_device_data_s aml_gdc_v3 = {
+	.dev_type = AML_GDC,
+	.clk_type = GATE,
+	.bit_width_ext = 1,
+	.gamma_support = 0,
+	.core_cnt = 1,
+	.smmu_support = 0,
+	.fw_version = AMLGDC_FW_V2
 };
 
 static const struct of_device_id gdc_dt_match[] = {
@@ -88,6 +119,7 @@ MODULE_DEVICE_TABLE(of, gdc_dt_match);
 static const struct of_device_id amlgdc_dt_match[] = {
 	{.compatible = "amlogic, aml-gdc",  .data = &aml_gdc},
 	{.compatible = "amlogic, aml-gdc-v2",  .data = &aml_gdc_v2},
+	{.compatible = "amlogic, aml-gdc-v3",  .data = &aml_gdc_v3},
 	{} };
 
 MODULE_DEVICE_TABLE(of, amlgdc_dt_match);
@@ -847,7 +879,7 @@ static int gdc_process_output_dma_info(struct gdc_context_s *context,
 		cfg = &context->dma_cfg.output_cfg[i].dma_cfg;
 		cfg->fd = gdc_get_buffer_fd(i, &gs_ex->output_buffer);
 		cfg->dev = dev;
-		cfg->dir = DMA_TO_DEVICE;
+		cfg->dir = DMA_FROM_DEVICE;
 		cfg->is_config_buf = 0;
 		ret = gdc_buffer_get_phys(cfg, &addr);
 		if (ret < 0) {
@@ -970,31 +1002,36 @@ unlock_return:
 	return ret;
 }
 
-static void release_config_firmware(struct fw_info_s *fw_info,
-				    struct gdc_config_s *gdc_config,
-				    u32 dev_type)
+void release_config_firmware(struct firmware_load_s *fw_load)
 {
 	struct device *dev = NULL;
 
-	if (!fw_info || !gdc_config) {
+	if (!fw_load) {
 		gdc_log(LOG_ERR, "NULL param, %s (%d)\n", __func__, __LINE__);
 		return;
 	}
 
-	dev = GDC_DEVICE(dev_type);
+	if (is_aml_gdc_supported()) {
+		dev = GDC_DEVICE(AML_GDC);
+	} else if (is_gdc_supported()) {
+		dev = GDC_DEVICE(ARM_GDC);
+	} else {
+		gdc_log(LOG_ERR, "HW is not supported %s (%d)\n",
+			__func__, __LINE__);
+		return;
+	}
 
-	if (fw_info->virt_addr &&
-	    gdc_config->config_size && gdc_config->config_addr) {
+	if (fw_load->virt_addr &&
+	    fw_load->size_32bit && fw_load->phys_addr) {
 		dma_free_coherent(dev,
-				  gdc_config->config_size * 4,
-				  fw_info->virt_addr,
-				  gdc_config->config_addr);
+				  fw_load->size_32bit * 4,
+				  fw_load->virt_addr,
+				  fw_load->phys_addr);
 	}
 }
+EXPORT_SYMBOL(release_config_firmware);
 
-static int load_firmware_by_name(struct fw_info_s *fw_info,
-				 struct gdc_config_s *gdc_config,
-				 u32 dev_type, phys_addr_t *fw_paddr)
+int load_firmware_by_name(char *fw_name, struct firmware_load_s *fw_load)
 {
 	int ret = -1;
 	const struct firmware *fw = NULL;
@@ -1003,14 +1040,22 @@ static int load_firmware_by_name(struct fw_info_s *fw_info,
 	phys_addr_t phys_addr = 0;
 	struct device *dev = NULL;
 
-	if (!fw_info || !fw_info->fw_name || !gdc_config) {
+	if (!fw_name || !fw_load) {
 		gdc_log(LOG_ERR, "NULL param, %s (%d)\n", __func__, __LINE__);
 		return -EINVAL;
 	}
 
-	dev = GDC_DEVICE(dev_type);
+	if (is_aml_gdc_supported()) {
+		dev = GDC_DEVICE(AML_GDC);
+	} else if (is_gdc_supported()) {
+		dev = GDC_DEVICE(ARM_GDC);
+	} else {
+		gdc_log(LOG_ERR, "HW is not supported %s (%d)\n",
+			__func__, __LINE__);
+		return -ENODEV;
+	}
 
-	gdc_log(LOG_DEBUG, "Try to load %s  ...\n", fw_info->fw_name);
+	gdc_log(LOG_DEBUG, "Try to load %s  ...\n", fw_name);
 
 	path = kzalloc(CONFIG_PATH_LENG, GFP_KERNEL);
 	if (!path) {
@@ -1018,11 +1063,11 @@ static int load_firmware_by_name(struct fw_info_s *fw_info,
 		return -ENOMEM;
 	}
 	snprintf(path, (CONFIG_PATH_LENG - 1), "%s/%s",
-		 FIRMWARE_DIR, fw_info->fw_name);
+		 FIRMWARE_DIR, fw_name);
 
 	ret = request_firmware(&fw, path, dev);
 	if (ret < 0) {
-		gdc_log(LOG_ERR, "Error : %d can't load the %s.\n", ret, path);
+		gdc_log(LOG_DEBUG, "Error : %d can't load the %s.\n", ret, path);
 		kfree(path);
 		return -ENOENT;
 	}
@@ -1044,12 +1089,9 @@ static int load_firmware_by_name(struct fw_info_s *fw_info,
 
 	memcpy(virt_addr, (char *)fw->data, fw->size);
 
-	gdc_config->config_addr = phys_addr;
-	gdc_config->config_size = fw->size / 4;
-	fw_info->virt_addr = virt_addr;
-
-	if (fw_paddr)
-		*fw_paddr = phys_addr;
+	fw_load->size_32bit = fw->size / 4;
+	fw_load->phys_addr = phys_addr;
+	fw_load->virt_addr = virt_addr;
 
 	gdc_log(LOG_DEBUG,
 		"current firmware virt_addr: 0x%p, fw->data: 0x%p.\n",
@@ -1064,6 +1106,7 @@ release:
 
 	return ret;
 }
+EXPORT_SYMBOL(load_firmware_by_name);
 
 int gdc_process_with_fw(struct gdc_context_s *context,
 			struct gdc_settings_with_fw *gs_with_fw)
@@ -1072,6 +1115,7 @@ int gdc_process_with_fw(struct gdc_context_s *context,
 	struct gdc_cmd_s *gdc_cmd = &context->cmd;
 	char *fw_name = NULL;
 	struct gdc_queue_item_s *pitem = NULL;
+	struct firmware_load_s  fw_load;
 
 	if (!context || !gs_with_fw) {
 		gdc_log(LOG_ERR, "Error input param\n");
@@ -1146,7 +1190,7 @@ int gdc_process_with_fw(struct gdc_context_s *context,
 		default:
 			gdc_log(LOG_ERR, "unsupported gdc format\n");
 			ret = -EINVAL;
-			goto release_fw;
+			goto release_fw_name;
 		}
 		snprintf(in_info, (64 - 1), "%d_%d_%d_%d_%d_%d",
 			 in->with, in->height,
@@ -1200,7 +1244,7 @@ int gdc_process_with_fw(struct gdc_context_s *context,
 			} else {
 				gdc_log(LOG_ERR, "custom fw_name is NULL\n");
 				ret = -EINVAL;
-				goto release_fw;
+				goto release_fw_name;
 			}
 			break;
 		case AFFINE:
@@ -1213,25 +1257,23 @@ int gdc_process_with_fw(struct gdc_context_s *context,
 		default:
 			gdc_log(LOG_ERR, "unsupported FW type\n");
 			ret = -EINVAL;
-			goto release_fw;
+			goto release_fw_name;
 		}
 
 		gs_with_fw->fw_info.fw_name = fw_name;
 	}
-	ret = load_firmware_by_name(&gs_with_fw->fw_info,
-				    &gs_with_fw->gdc_config,
-				    context->cmd.dev_type, NULL);
+
+	ret = load_firmware_by_name(gs_with_fw->fw_info.fw_name,
+				    &fw_load);
 	if (ret <= 0) {
 		gdc_log(LOG_ERR, "line %d,load FW %s failed\n",
 			__LINE__, gs_with_fw->fw_info.fw_name);
 		ret = -EINVAL;
-		goto release_fw;
+		goto release_fw_name;
 	}
 
-	gdc_cmd->gdc_config.config_addr =
-		gs_with_fw->gdc_config.config_addr;
-	gdc_cmd->gdc_config.config_size =
-		gs_with_fw->gdc_config.config_size;
+	gdc_cmd->gdc_config.config_addr = fw_load.phys_addr;
+	gdc_cmd->gdc_config.config_size = fw_load.size_32bit;
 
 	/* set block mode */
 	context->cmd.wait_done_flag = 1;
@@ -1244,13 +1286,11 @@ int gdc_process_with_fw(struct gdc_context_s *context,
 	}
 	mutex_unlock(&context->d_mutext);
 	gdc_wq_add_work(context, pitem);
-	release_config_firmware(&gs_with_fw->fw_info, &gs_with_fw->gdc_config,
-				context->cmd.dev_type);
+	release_config_firmware(&fw_load);
 	kfree(fw_name);
 	return 0;
 release_fw:
-	release_config_firmware(&gs_with_fw->fw_info, &gs_with_fw->gdc_config,
-				context->cmd.dev_type);
+	release_config_firmware(&fw_load);
 
 release_fw_name:
 	mutex_unlock(&context->d_mutext);
@@ -1285,6 +1325,7 @@ int gdc_process_phys(struct gdc_context_s *context,
 	mutex_lock(&context->d_mutext);
 	gdc_cmd = &context->cmd;
 	memset(gdc_cmd, 0, sizeof(struct gdc_cmd_s));
+	memset(&fw_info, 0, sizeof(struct fw_info_s));
 
 	/* set dev type, ARM_GDC or AML_GDC */
 	context->cmd.dev_type = dev_type;
@@ -1295,24 +1336,54 @@ int gdc_process_phys(struct gdc_context_s *context,
 	i_height = gs->in_height;
 	o_width = gs->out_width;
 	o_height = gs->out_height;
+	i_y_stride = gs->in_y_stride;
+	i_c_stride = gs->in_c_stride;
+	o_y_stride = gs->out_y_stride;
+	o_c_stride = gs->out_c_stride;
 
-	i_y_stride = AXI_WORD_ALIGN(i_width);
-	o_y_stride = AXI_WORD_ALIGN(o_width);
-
-	if (format == NV12 || format == YUV444_P || format == RGB444_P) {
-		i_c_stride = AXI_WORD_ALIGN(i_width);
-		o_c_stride = AXI_WORD_ALIGN(o_width);
-	} else if (format == YV12) {
-		i_c_stride = AXI_WORD_ALIGN(i_width) / 2;
-		o_c_stride = AXI_WORD_ALIGN(o_width) / 2;
-	} else if (format == Y_GREY) {
-		i_c_stride = 0;
-		o_c_stride = 0;
-	} else {
-		gdc_log(LOG_ERR, "Error unknown format\n");
-		mutex_unlock(&context->d_mutext);
-		return -EINVAL;
+	/* if the input and output strides are all not set,
+	 * calculations will be made based on the format and input/output size.
+	 */
+	if (!i_y_stride && !i_c_stride) {
+		if (format == NV12 || format == YUV444_P ||
+		    format == RGB444_P) {
+			i_y_stride = AXI_WORD_ALIGN(i_width);
+			i_c_stride = AXI_WORD_ALIGN(i_width);
+		} else if (format == YV12) {
+			i_c_stride = AXI_WORD_ALIGN(i_width / 2);
+			i_y_stride = i_c_stride * 2;
+		} else if (format == Y_GREY) {
+			i_y_stride = AXI_WORD_ALIGN(i_width);
+			i_c_stride = 0;
+		} else {
+			gdc_log(LOG_ERR, "Error unknown format\n");
+			mutex_unlock(&context->d_mutext);
+			return -EINVAL;
+		}
 	}
+
+	if (!o_y_stride && !o_c_stride) {
+		if (format == NV12 || format == YUV444_P ||
+		    format == RGB444_P) {
+			o_y_stride = AXI_WORD_ALIGN(o_width);
+			o_c_stride = AXI_WORD_ALIGN(o_width);
+		} else if (format == YV12) {
+			o_c_stride = AXI_WORD_ALIGN(o_width / 2);
+			o_y_stride = o_c_stride * 2;
+		} else if (format == Y_GREY) {
+			o_y_stride = AXI_WORD_ALIGN(o_width);
+			o_c_stride = 0;
+		} else {
+			gdc_log(LOG_ERR, "Error unknown format\n");
+			mutex_unlock(&context->d_mutext);
+			return -EINVAL;
+		}
+	}
+
+	gdc_log(LOG_DEBUG, "input, format:%d, width:%d, height:%d y_stride:%d c_stride:%d\n",
+		format, i_width, i_height, i_y_stride, i_c_stride);
+	gdc_log(LOG_DEBUG, "output, format:%d, width:%d, height:%d y_stride:%d c_stride:%d\n",
+		format, o_width, o_height, o_y_stride, o_c_stride);
 
 	gdc_cmd->gdc_config.format = format;
 	gdc_cmd->gdc_config.input_width = i_width;
@@ -1323,10 +1394,13 @@ int gdc_process_phys(struct gdc_context_s *context,
 	gdc_cmd->gdc_config.output_height = o_height;
 	gdc_cmd->gdc_config.output_y_stride = o_y_stride;
 	gdc_cmd->gdc_config.output_c_stride = o_c_stride;
-	gdc_cmd->gdc_config.config_addr = gs->config_paddr;
+	gdc_cmd->gdc_config.config_addr = (u32)gs->config_paddr;
 	gdc_cmd->gdc_config.config_size = gs->config_size;
 	gdc_cmd->outplane = gs->out_plane_num;
 	gdc_cmd->use_sec_mem = gs->use_sec_mem;
+
+	/* set config_paddr MSB val */
+	context->dma_cfg.config_cfg.paddr_8g_msb = (u64)gs->config_paddr >> 32;
 
 	/* output_addr */
 	plane_number = gs->out_plane_num;
@@ -1402,43 +1476,16 @@ int gdc_process_phys(struct gdc_context_s *context,
 			i, gs->in_paddr[i]);
 	}
 
-	/* config_addr */
-	if (gs->use_builtin_fw) {
-		phys_addr_t fw_paddr;
-
-		fw_info.fw_name = gs->config_name;
-		ret = load_firmware_by_name(&fw_info, &gdc_cmd->gdc_config,
-					    context->cmd.dev_type, &fw_paddr);
-		if (ret <= 0) {
-			gdc_log(LOG_ERR, "line %d,load FW %s failed\n",
-				__LINE__, fw_info.fw_name);
-			mutex_unlock(&context->d_mutext);
-			return -EINVAL;
-		}
-		/* set MSB val */
-		context->dma_cfg.config_cfg.paddr_8g_msb =
-							(u64)fw_paddr >> 32;
-	} else {
-		/* set MSB val */
-		context->dma_cfg.config_cfg.paddr_8g_msb =
-						(u64)gs->config_paddr >> 32;
-	}
-
 	/* set block mode */
 	context->cmd.wait_done_flag = 1;
 	pitem = gdc_prepare_item(context);
 	if (!pitem) {
 		gdc_log(LOG_ERR, "get item error\n");
-		ret = -ENOMEM;
 		mutex_unlock(&context->d_mutext);
-		goto release_fw;
+		return -ENOMEM;
 	}
 	mutex_unlock(&context->d_mutext);
 	gdc_wq_add_work(context, pitem);
-release_fw:
-	if (gs->use_builtin_fw)
-		release_config_firmware(&fw_info, &gdc_cmd->gdc_config,
-					context->cmd.dev_type);
 
 	return ret;
 }
@@ -1464,12 +1511,14 @@ static long meson_gdc_ioctl(struct file *file, unsigned int cmd,
 	void __user *argp = (void __user *)arg;
 	struct gdc_queue_item_s *pitem = NULL;
 	struct device *dev = NULL;
+	int fw_version = -1;
 
 	context = (struct gdc_context_s *)file->private_data;
 	gdc_cmd = &context->cmd;
 	gc = &gdc_cmd->gdc_config;
 
 	dev = GDC_DEVICE(context->cmd.dev_type);
+	fw_version = GDC_DEV_T(context->cmd.dev_type)->fw_version;
 
 	switch (cmd) {
 	case GDC_PROCESS:
@@ -1711,6 +1760,17 @@ static long meson_gdc_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		}
 		gdc_buffer_cache_flush(dma_fd, context->cmd.dev_type);
+		break;
+	case GDC_GET_VERSION:
+		if (fw_version < 0)
+			gdc_log(LOG_ERR, "Invalid amlgdc_compatible\n");
+
+		ret = copy_to_user(argp, &fw_version,
+					sizeof(int));
+		if (ret < 0) {
+			pr_err("Error user param\n");
+			return -EINVAL;
+		}
 		break;
 	default:
 		gdc_log(LOG_ERR, "unsupported cmd 0x%x\n", cmd);
@@ -1984,9 +2044,79 @@ irqreturn_t gdc_interrupt_handler(int irq, void *param)
 	return IRQ_HANDLED;
 }
 
+static void gdc_irq_init(struct meson_gdc_dev_t *gdc_dev, u32 dev_type)
+{
+	int i, rc = 0, irq;
+
+	if (!gdc_dev || !gdc_dev->pdev) {
+		gdc_log(LOG_ERR, "%s, wrong param\n", __func__);
+		return;
+	}
+	/* irq init */
+	for (i = 0; i < gdc_dev->core_cnt; i++) {
+		irq = platform_get_irq(gdc_dev->pdev, i);
+		if (irq < 0) {
+			gdc_log(LOG_ERR, "cannot find %d irq for gdc\n", i);
+			return;
+		}
+
+		gdc_log(LOG_DEBUG, "request irq:%s\n",
+			irq_name[dev_type][i]);
+		irq_data[dev_type][i].dev_type = dev_type;
+		irq_data[dev_type][i].core_id = i;
+		rc = devm_request_irq(&gdc_dev->pdev->dev, irq,
+				      gdc_interrupt_handler,
+				      IRQF_SHARED,
+				      irq_name[dev_type][i],
+				      &irq_data[dev_type][i]);
+		if (rc != 0) {
+			gdc_log(LOG_ERR, "cannot create %d irq func gdc\n", i);
+			return;
+		}
+	}
+}
+
+#ifdef CONFIG_AMLOGIC_FREERTOS
+static void work_func(struct work_struct *w)
+{
+	struct timer_data_s *timer_data =
+		container_of(w, struct timer_data_s, work);
+	u32 dev_type = timer_data->dev_type;
+
+	if (dev_type == ARM_GDC)
+		gdc_log(LOG_DEBUG, "gdc %s enter\n", __func__);
+	else
+		gdc_log(LOG_DEBUG, "amlgdc %s enter\n", __func__);
+
+	gdc_runtime_pwr_all(dev_type, 0);
+	gdc_clk_config_all(dev_type, 0);
+	gdc_irq_init(timer_data->gdc_dev, dev_type);
+}
+
+static void timer_expire(struct timer_list *t)
+{
+	struct timer_data_s *timer_data = from_timer(timer_data, t, timer);
+	u32 dev_type = timer_data->dev_type;
+
+	if (dev_type == ARM_GDC)
+		gdc_log(LOG_DEBUG, "gdc %s enter\n", __func__);
+	else
+		gdc_log(LOG_DEBUG, "amlgdc %s enter\n", __func__);
+
+	if (freertos_is_finished()) {
+		del_timer(&timer_data->timer);
+		/* might sleep, use work to process */
+		schedule_work(&timer_data->work);
+	} else {
+		mod_timer(&timer_data->timer,
+			  jiffies + msecs_to_jiffies(TIMER_MS));
+	}
+}
+#endif
+
 static int gdc_platform_probe(struct platform_device *pdev)
 {
-	int rc = -1, clk_rate = 0, i = 0, irq;
+	int rc = -1, clk_rate = 0, i = 0;
 	struct resource *gdc_res;
 	struct meson_gdc_dev_t *gdc_dev = NULL;
 	const struct of_device_id *match;
@@ -2038,6 +2168,7 @@ static int gdc_platform_probe(struct platform_device *pdev)
 	gdc_dev->pdev = pdev;
 	gdc_dev->ext_msb_8g = gdc_data->ext_msb_8g;
 	gdc_dev->core_cnt = gdc_data->core_cnt;
+	gdc_dev->fw_version = gdc_data->fw_version;
 
 	gdc_dev->misc_dev.minor = MISC_DYNAMIC_MINOR;
 	gdc_dev->misc_dev.name = drv_name;
@@ -2057,29 +2188,9 @@ static int gdc_platform_probe(struct platform_device *pdev)
 		goto free_config;
 	}
 
-	/* irq init */
-	for (i = 0; i < gdc_dev->core_cnt; i++) {
-		irq = platform_get_irq(pdev, i);
-		if (gdc_dev->irq < 0) {
-			gdc_log(LOG_DEBUG, "cannot find irq for gdc\n");
-			rc = -EINVAL;
-			goto free_config;
-		}
-
-		gdc_log(LOG_DEBUG, "request irq:%s\n",
-			irq_name[dev_type][i]);
-		irq_data[dev_type][i].dev_type = dev_type;
-		irq_data[dev_type][i].core_id = i;
-		rc = devm_request_irq(&pdev->dev, irq,
-				      gdc_interrupt_handler,
-				      IRQF_SHARED,
-				      irq_name[dev_type][i],
-				      &irq_data[dev_type][i]);
-		if (rc != 0) {
-			gdc_log(LOG_ERR, "cannot create irq func gdc\n");
-			goto free_config;
-		}
-	}
+#ifndef CONFIG_AMLOGIC_FREERTOS
+	gdc_irq_init(gdc_dev, dev_type);
+#endif
 
 	if (gdc_data->smmu_support &&
 	    of_find_property(pdev->dev.of_node, "iommus", NULL)) {
@@ -2163,10 +2274,13 @@ static int gdc_platform_probe(struct platform_device *pdev)
 			}
 		}
 	}
-	/* 8g memory support */
-	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
-	pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
 
+	/* for smmu: default dma_mask has been set in of_dma_configure */
+	if (!gdc_smmu_enable) {
+		/* 8g memory support */
+		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
+		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+	}
 	rc = misc_register(&gdc_dev->misc_dev);
 	if (rc < 0) {
 		gdc_log(LOG_ERR, "misc_register() for minor %d failed\n",
@@ -2185,16 +2299,8 @@ static int gdc_platform_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, gdc_dev);
 	dev_set_drvdata(gdc_dev->misc_dev.this_device, gdc_dev);
 
-	for (i = 0; i < gdc_dev->core_cnt; i++) {
-		if (gdc_data->clk_type == CORE_AXI) {
-			clk_disable_unprepare(gdc_dev->clk_core[i]);
-			clk_disable_unprepare(gdc_dev->clk_axi[i]);
-		} else if (gdc_data->clk_type == MUXGATE_MUXSEL_GATE ||
-			   gdc_data->clk_type == GATE) {
-			clk_disable_unprepare(gdc_dev->clk_gate[i]);
-		}
+	for (i = 0; i < gdc_dev->core_cnt; i++)
 		GDC_DEV_T(dev_type)->is_idle[i] = 1;
-	}
 
 	/* power domain init */
 	rc = gdc_pwr_init(&pdev->dev, gdc_dev->pd, dev_type);
@@ -2205,6 +2311,30 @@ static int gdc_platform_probe(struct platform_device *pdev)
 			rc);
 		goto free_config;
 	}
+
+#ifdef CONFIG_AMLOGIC_FREERTOS
+	/* To avoid interfering with RTOS clock/power/interrupt resources,
+	 * turn on and keep power/clk first.
+	 * Poll the status of rtos,
+	 * then turn off power/clk and register interrupt.
+	 */
+	if (freertos_is_run() && !freertos_is_finished()) {
+		INIT_WORK(&timer_data[dev_type].work, work_func);
+		timer_setup(&timer_data[dev_type].timer, timer_expire, 0);
+		timer_data[dev_type].timer.expires =
+					jiffies + msecs_to_jiffies(TIMER_MS);
+		timer_data[dev_type].gdc_dev = gdc_dev;
+		timer_data[dev_type].dev_type = dev_type;
+		add_timer(&timer_data[dev_type].timer);
+
+		gdc_runtime_pwr_all(dev_type, 1);
+	} else {
+		gdc_irq_init(gdc_dev, dev_type);
+		gdc_clk_config_all(dev_type, 0);
+	}
+#else
+	gdc_clk_config_all(dev_type, 0);
+#endif
 
 	if (!kthread_created) {
 		gdc_wq_init();

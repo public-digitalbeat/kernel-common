@@ -23,6 +23,9 @@
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
 #include <sound/control.h>
+#ifdef CONFIG_AMLOGIC_LEGACY_EARLY_SUSPEND
+#include <linux/amlogic/pm.h>
+#endif
 #include "card.h"
 
 #include "effects.h"
@@ -186,10 +189,11 @@ static int aml_audio_hal_format_set_enum(struct snd_kcontrol *kcontrol,
 	struct snd_soc_card *card = snd_kcontrol_chip(kcontrol);
 	struct aml_card_data *p_aml_audio;
 	int hal_format = ucontrol->value.integer.value[0];
+	struct snd_card *snd = card->snd_card;
 
 	p_aml_audio = snd_soc_card_get_drvdata(card);
 
-	audio_send_uevent(card->dev, AUDIO_SPDIF_FMT_EVENT, hal_format);
+	audio_send_uevent(&snd->ctl_dev, AUDIO_SPDIF_FMT_EVENT, hal_format);
 	pr_info("update audio atmos flag! audio_type = %d\n", hal_format);
 
 	if (p_aml_audio->hal_fmt != hal_format)
@@ -839,6 +843,7 @@ static int aml_card_parse_gpios(struct device_node *node,
 	enum of_gpio_flags flags;
 	int gpio;
 	bool active_low;
+	unsigned int sleep_time = 500;
 
 	gpio = of_get_named_gpio_flags(node, "spk_mute-gpios", 0, &flags);
 	priv->spk_mute_gpio = gpio;
@@ -875,7 +880,11 @@ static int aml_card_parse_gpios(struct device_node *node,
 	}
 	if (!IS_ERR(priv->avout_mute_desc)) {
 		if (!priv->av_mute_enable) {
-			msleep(500);
+			if (!of_property_read_u32(node,
+				"av_mute_sleep_time", &sleep_time))
+				msleep(sleep_time);
+			else
+				msleep(500);
 			gpiod_direction_output(priv->avout_mute_desc,
 				GPIOF_OUT_INIT_HIGH);
 			pr_info("av out status: %s\n",
@@ -1049,6 +1058,71 @@ static int register_audio_exception64_isr(int irq_exception64)
 	return ret;
 }
 
+#ifdef CONFIG_AMLOGIC_LEGACY_EARLY_SUSPEND
+static void aml_card_early_suspend(struct early_suspend *h)
+{
+	struct platform_device *pdev = h->param;
+
+	pr_info("entry %s\n", __func__);
+	if (pdev) {
+		struct snd_soc_card *card = platform_get_drvdata(pdev);
+		struct aml_card_data *priv = snd_soc_card_get_drvdata(card);
+
+		if (!priv->spk_mute_flag) {
+			int gpio = priv->spk_mute_gpio;
+			bool active_low = priv->spk_mute_active_low;
+			bool value = active_low ? false : true;
+
+			if (gpio_is_valid(gpio))
+				gpio_set_value(gpio, value);
+		}
+
+		if (!IS_ERR(priv->avout_mute_desc)) {
+			gpiod_direction_output(priv->avout_mute_desc,
+					GPIOF_OUT_INIT_LOW);
+				pr_info("%s, av out status: %s\n",
+					__func__,
+					gpiod_get_value(priv->avout_mute_desc) ?
+					"high" : "low");
+		}
+	}
+}
+
+static void aml_card_late_resume(struct early_suspend *h)
+{
+	struct platform_device *pdev = h->param;
+
+	pr_info("entry %s\n", __func__);
+	if (pdev) {
+		struct snd_soc_card *card = platform_get_drvdata(pdev);
+		struct aml_card_data *priv = snd_soc_card_get_drvdata(card);
+
+		if (!priv->spk_mute_flag) {
+			int gpio = priv->spk_mute_gpio;
+			bool active_low = priv->spk_mute_active_low;
+			bool value = active_low ? true : false;
+
+			if (gpio_is_valid(gpio))
+				gpio_set_value(gpio, value);
+		}
+
+		if (!IS_ERR(priv->avout_mute_desc)) {
+			gpiod_direction_output(priv->avout_mute_desc,
+					GPIOF_OUT_INIT_HIGH);
+				pr_info("%s, av out status: %s\n",
+					__func__,
+					gpiod_get_value(priv->avout_mute_desc) ?
+					"high" : "low");
+		}
+	}
+}
+
+static struct early_suspend card_early_suspend_handler = {
+	.suspend = aml_card_early_suspend,
+	.resume  = aml_card_late_resume,
+};
+#endif
+
 static int aml_card_probe(struct platform_device *pdev)
 {
 	struct aml_card_data *priv;
@@ -1177,6 +1251,11 @@ static int aml_card_probe(struct platform_device *pdev)
 	priv->spk_mute_enable = 0;
 	INIT_WORK(&priv->init_work, aml_init_work);
 	schedule_work(&priv->init_work);
+
+#ifdef CONFIG_AMLOGIC_LEGACY_EARLY_SUSPEND
+	card_early_suspend_handler.param = pdev;
+	register_early_suspend(&card_early_suspend_handler);
+#endif
 
 	return 0;
 err:

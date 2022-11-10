@@ -25,7 +25,9 @@
 #include <linux/amlogic/media/vout/lcd/aml_bl.h>
 #include <linux/amlogic/media/vout/lcd/lcd_notify.h>
 #include <linux/amlogic/media/vout/lcd/lcd_unifykey.h>
+#include <linux/compat.h>
 #include <linux/amlogic/media/vout/lcd/lcd_vout.h>
+#include <linux/sched/clock.h>
 #ifdef CONFIG_AMLOGIC_BL_EXTERN
 #include <linux/amlogic/media/vout/lcd/aml_bl_extern.h>
 #endif
@@ -1795,12 +1797,16 @@ static int bl_lcd_on_notifier(struct notifier_block *nb,
 {
 	struct aml_lcd_drv_s *pdrv = (struct aml_lcd_drv_s *)data;
 	struct aml_bl_drv_s *bdrv;
+	unsigned long long local_time[3];
 
 	if ((event & LCD_EVENT_BL_ON) == 0)
 		return NOTIFY_DONE;
 
 	if (!pdrv)
 		return NOTIFY_DONE;
+
+	local_time[0] = sched_clock();
+
 	bdrv = aml_bl_get_driver(pdrv->index);
 	if (aml_bl_check_driver(bdrv))
 		return NOTIFY_DONE;
@@ -1824,6 +1830,9 @@ static int bl_lcd_on_notifier(struct notifier_block *nb,
 		BLERR("[%d]: wrong backlight control method\n", bdrv->index);
 	}
 
+	local_time[1] = sched_clock();
+	pdrv->config.cus_ctrl.bl_on_time = local_time[1] - local_time[0];
+
 	return NOTIFY_OK;
 }
 
@@ -1832,12 +1841,15 @@ static int bl_lcd_off_notifier(struct notifier_block *nb,
 {
 	struct aml_lcd_drv_s *pdrv = (struct aml_lcd_drv_s *)data;
 	struct aml_bl_drv_s *bdrv;
+	unsigned long long local_time[3];
 
 	if ((event & LCD_EVENT_BL_OFF) == 0)
 		return NOTIFY_DONE;
 
 	if (!pdrv)
 		return NOTIFY_DONE;
+	local_time[0] = sched_clock();
+
 	bdrv = aml_bl_get_driver(pdrv->index);
 	if (aml_bl_check_driver(bdrv))
 		return NOTIFY_DONE;
@@ -1855,6 +1867,9 @@ static int bl_lcd_off_notifier(struct notifier_block *nb,
 		bl_power_off(bdrv);
 	bdrv->state &= ~BL_STATE_BL_INIT_ON;
 	mutex_unlock(&bl_level_mutex);
+
+	local_time[1] = sched_clock();
+	pdrv->config.cus_ctrl.bl_off_time = local_time[1] - local_time[0];
 
 	return NOTIFY_OK;
 }
@@ -2489,19 +2504,29 @@ static ssize_t bl_debug_pwm_info_show(struct device *dev,
 				       "pwm_freq:           %d\n"
 				       "pwm_duty_max:       %d\n"
 				       "pwm_duty_min:       %d\n"
+				       "pwm_level_max:		%d\n"
+				       "pwm_level_min:		%d\n"
 				       "pwm_cnt:            %d\n"
 				       "pwm_max:            %d\n"
 				       "pwm_min:            %d\n"
-				       "pwm_level:          %d\n",
+				       "pwm_level:          %d\n"
+				       "pwm_mapping:		%d_%d_%d_%d_%d\n",
 				       bl_pwm->index,
 				       bl_pwm_num_to_str(bl_pwm->pwm_port),
 				       bl_pwm->pwm_port,
 				       bl_pwm->pwm_method, bl_pwm->pwm_freq,
 				       bl_pwm->pwm_duty_max,
 				       bl_pwm->pwm_duty_min,
+				       bl_pwm->level_max,
+				       bl_pwm->level_min,
 				       bl_pwm->pwm_cnt,
 				       bl_pwm->pwm_max, bl_pwm->pwm_min,
-				       bl_pwm->pwm_level);
+				       bl_pwm->pwm_level,
+				       bl_pwm->pwm_mapping[0],
+				       bl_pwm->pwm_mapping[1],
+				       bl_pwm->pwm_mapping[2],
+				       bl_pwm->pwm_mapping[3],
+				       bl_pwm->pwm_mapping[4]);
 			if (bl_pwm->pwm_duty_max > 100) {
 				len += sprintf(buf + len,
 					       "pwm_duty:           %d(%d%%)\n",
@@ -2575,19 +2600,29 @@ static ssize_t bl_debug_pwm_info_show(struct device *dev,
 				       "pwm_0_freq:         %d\n"
 				       "pwm_0_duty_max:     %d\n"
 				       "pwm_0_duty_min:     %d\n"
+				       "pwm_0_level_max:	%d\n"
+				       "pwm_0_level_min:	%d\n"
 				       "pwm_0_cnt:          %d\n"
 				       "pwm_0_max:          %d\n"
 				       "pwm_0_min:          %d\n"
-				       "pwm_0_level:        %d\n",
+				       "pwm_0_level:        %d\n"
+				       "pwm_0_mapping:		%d_%d_%d_%d_%d\n",
 				       bl_pwm->index,
 				       bl_pwm_num_to_str(bl_pwm->pwm_port),
 				       bl_pwm->pwm_port,
 				       bl_pwm->pwm_method, bl_pwm->pwm_freq,
 				       bl_pwm->pwm_duty_max,
 				       bl_pwm->pwm_duty_min,
+				       bl_pwm->level_max,
+				       bl_pwm->level_min,
 				       bl_pwm->pwm_cnt,
 				       bl_pwm->pwm_max, bl_pwm->pwm_min,
-				       bl_pwm->pwm_level);
+				       bl_pwm->pwm_level,
+				       bl_pwm->pwm_mapping[0],
+				       bl_pwm->pwm_mapping[1],
+				       bl_pwm->pwm_mapping[2],
+				       bl_pwm->pwm_mapping[3],
+				       bl_pwm->pwm_mapping[4]);
 			if (bl_pwm->pwm_duty_max > 100) {
 				len += sprintf(buf + len,
 					       "pwm_0_duty:         %d(%d%%)\n",
@@ -2656,19 +2691,29 @@ static ssize_t bl_debug_pwm_info_show(struct device *dev,
 				       "pwm_1_freq:         %d\n"
 				       "pwm_1_duty_max:     %d\n"
 				       "pwm_1_duty_min:     %d\n"
+				       "pwm_1_level_max:	%d\n"
+				       "pwm_1_level_min:	%d\n"
 				       "pwm_1_cnt:          %d\n"
 				       "pwm_1_max:          %d\n"
 				       "pwm_1_min:          %d\n"
-				       "pwm_1_level:        %d\n",
+				       "pwm_1_level:        %d\n"
+				       "pwm_1_mapping:		%d_%d_%d_%d_%d\n",
 				       bl_pwm->index,
 				       bl_pwm_num_to_str(bl_pwm->pwm_port),
 				       bl_pwm->pwm_port,
 				       bl_pwm->pwm_method, bl_pwm->pwm_freq,
 				       bl_pwm->pwm_duty_max,
 				       bl_pwm->pwm_duty_min,
+				       bl_pwm->level_max,
+				       bl_pwm->level_min,
 				       bl_pwm->pwm_cnt,
 				       bl_pwm->pwm_max, bl_pwm->pwm_min,
-				       bl_pwm->pwm_level);
+				       bl_pwm->pwm_level,
+				       bl_pwm->pwm_mapping[0],
+				       bl_pwm->pwm_mapping[1],
+				       bl_pwm->pwm_mapping[2],
+				       bl_pwm->pwm_mapping[3],
+				       bl_pwm->pwm_mapping[4]);
 			if (bl_pwm->pwm_duty_max > 100) {
 				len += sprintf(buf + len,
 					       "pwm_1_duty:         %d(%d%%)\n",
@@ -2755,7 +2800,7 @@ static ssize_t bl_debug_pwm_show(struct device *dev,
 				len += sprintf(buf + len,
 					       "duty_value=%d(%d%%)\n",
 					       bl_pwm->pwm_duty,
-					       bl_pwm->pwm_duty * 100 / 255);
+					       bl_pwm->pwm_duty * 100 / bl_pwm->pwm_duty_max);
 			} else {
 				len += sprintf(buf + len,
 					       "duty_value=%d%%\n",
@@ -2775,7 +2820,7 @@ static ssize_t bl_debug_pwm_show(struct device *dev,
 				len += sprintf(buf + len,
 					       "duty_value=%d(%d%%)\n",
 					       bl_pwm->pwm_duty,
-					       bl_pwm->pwm_duty * 100 / 255);
+					       bl_pwm->pwm_duty * 100 / bl_pwm->pwm_duty_max);
 			} else {
 				len += sprintf(buf + len,
 					       "duty_value=%d%%\n",
@@ -2794,7 +2839,7 @@ static ssize_t bl_debug_pwm_show(struct device *dev,
 				len += sprintf(buf + len,
 					       "duty_value=%d(%d%%)\n",
 					       bl_pwm->pwm_duty,
-					       bl_pwm->pwm_duty * 100 / 255);
+					       bl_pwm->pwm_duty * 100 / bl_pwm->pwm_duty_max);
 			} else {
 				len += sprintf(buf + len,
 					       "duty_value=%d%%\n",
@@ -2883,7 +2928,9 @@ static void bl_debug_pwm_set(struct aml_bl_drv_s *bdrv, unsigned int index,
 			break;
 		case BL_DEBUG_PWM_DUTY_MAX:
 			bl_pwm->pwm_duty_max = value;
-			if (bl_pwm->pwm_duty_max > 100)
+			if (bl_pwm->pwm_duty_max > 255)
+				pwm_range = 40950;
+			else if (bl_pwm->pwm_duty_max > 100)
 				pwm_range = 2550;
 			else
 				pwm_range = 1000;
@@ -2943,6 +2990,9 @@ static ssize_t bl_debug_pwm_store(struct device *dev,
 	struct aml_bl_drv_s *bdrv = dev_get_drvdata(dev);
 	unsigned int ret;
 	unsigned int index = 0, val = 0;
+	unsigned int val1 = 0, val2 = 0, val3 = 0, val4 = 0;
+	struct bl_config_s *bconf = &bdrv->bconf;
+	struct bl_pwm_config_s *bl_pwm = NULL;
 
 	switch (buf[0]) {
 	case 'f':
@@ -3007,6 +3057,35 @@ static ssize_t bl_debug_pwm_store(struct device *dev,
 			} else {
 				BLERR("invalid parameters\n");
 			}
+		}
+		break;
+	case 'c': /* curve */
+		ret = sscanf(buf, "curve %d %d %d %d %d %d",
+			&index, &val, &val1, &val2, &val3, &val4);
+		if (ret == 6) {
+			switch (bconf->method) {
+			case BL_CTRL_PWM:
+				bl_pwm = bconf->bl_pwm;
+				break;
+			case BL_CTRL_PWM_COMBO:
+				if (index == 0)
+					bl_pwm = bconf->bl_pwm_combo0;
+				else
+					bl_pwm = bconf->bl_pwm_combo1;
+				break;
+			default:
+				BLERR("not pwm control method\n");
+				break;
+			}
+			if (bl_pwm) {
+				bl_pwm->pwm_mapping[0] = val;
+				bl_pwm->pwm_mapping[1] = val1;
+				bl_pwm->pwm_mapping[2] = val2;
+				bl_pwm->pwm_mapping[3] = val3;
+				bl_pwm->pwm_mapping[4] = val4;
+			}
+		} else {
+			BLERR("invalid parameters\n");
 		}
 		break;
 	default:
@@ -3795,6 +3874,8 @@ static void aml_bl_config_probe_work(struct work_struct *work)
 	ret = bl_config_load(bdrv, bdrv->pdev);
 	if (ret)
 		goto err;
+
+	bl_pwm_mapping_init(bdrv);
 
 	memset(&props, 0, sizeof(struct backlight_properties));
 	props.type = BACKLIGHT_RAW;

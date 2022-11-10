@@ -256,11 +256,10 @@
 		};
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x7f800000 0x0 0x800000>;
+			reg = <0x0 0x7f800000 0x0 0x800000>;
 		};
 
 		ion_cma_reserved:linux,ion-dev {
@@ -673,9 +672,9 @@
 		compatible = "amlogic, vecm-tm2-verb";
 		dev_name = "aml_vecm";
 		status = "okay";
-		gamma_en = <0>;/*1:enabel ;0:disable*/
-		wb_en = <0>;/*1:enabel ;0:disable*/
-		cm_en = <0>;/*1:enabel ;0:disable*/
+		gamma_en = <0>;/*1:enable ;0:disable*/
+		wb_en = <0>;/*1:enable ;0:disable*/
+		cm_en = <0>;/*1:enable ;0:disable*/
 		wb_sel = <0>;/*1:mtx ;0:gainoff*/
 		vlock_en = <0>;/*1:enable;0:disable*/
 		vlock_mode = <0x8>;
@@ -695,7 +694,7 @@
 		compatible = "amlogic, dolby_vision_tm2";
 		dev_name = "aml_amdolby_vision_driver";
 		status = "okay";
-		tv_mode = <0>;/*1:enabel ;0:disable*/
+		tv_mode = <0>;/*1:enable ;0:disable*/
 	};
 
 	vdin@0 {

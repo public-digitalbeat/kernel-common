@@ -41,6 +41,11 @@
 		#size-cells = <2>;
 		ranges;
 
+		ramdump_bl33z@00000000 {
+			reg = <0x0 0x0 0x0 0x1800000>; /* 0 ~ 24M */
+			status = "disabled";
+		};
+
 		ramoops@0x07400000 {
 			compatible = "ramoops";
 			reg = <0x0 0x07400000 0x0 0x00100000>;
@@ -72,18 +77,14 @@
 			compatible = "shared-dma-pool";
 			reusable;
 			/* keep sync with fb, fox example:logo_addr = "0x30000000"*/
-			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x30000000 0x0 0x800000>;
+			reg = <0x0 0x30000000 0x0 0x800000>;
 		};
 
 		lcd_tcon_reserved:linux,lcd_tcon {
-			compatible = "shared-dma-pool";
-			reusable;
-			/* alloc-ranges start should not be 0x0*/
-			size = <0x0 0x00c00000>;
-			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3ec00000 0x0 0x00c00000>;
+			compatible = "amlogic, lcd_tcon";
+			reg = <0x0 0x3ec00000 0x0 0x00c00000>;
+			no-map;
 		};
 
 		ion_cma_reserved:linux,ion-dev {
@@ -92,7 +93,7 @@
 			size = <0x0 0x8000000>;
 			alignment = <0x0 0x400000>;
 		};
-		/* secure ion for gpu,advice size is 0x8000000 */
+		/* secure ion for gpu, advice size is 80M */
 		ion_secure_reserved:linux,ion-secure {
 			compatible = "amlogic, ion-secure-mem";
 			no-map;
@@ -869,7 +870,7 @@
 		compatible = "amlogic, t3_frc";
 		dev_name = "aml_frc";
 		status = "okay";
-		frc_en = <1>;/*1:enabel ;0:disable*/
+		frc_en = <1>;/*1:enable ;0:disable*/
 		frc_hw_pos = <0>;/*0:before postblend; 1:after postblend*/
 		interrupts = <GIC_SPI 286 IRQ_TYPE_EDGE_RISING
 				GIC_SPI 287 IRQ_TYPE_EDGE_RISING
@@ -894,6 +895,45 @@
 		pq_en = <1>;
 	};
 }; /* end of / */
+
+&thermal_zones {
+	vpu_thermal {
+		trips {
+			vpuswitch_on: trip-point@0 {
+				temperature = <85000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+			vpucontrol: trip-point@1 {
+				temperature = <95000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+			ddrhot: trip-point@2 {
+				temperature = <90000>;
+				hysteresis = <10000>;
+				type = "hot";
+			};
+			vpucritical {
+				temperature = <110000>;
+				hysteresis = <1000>;
+				type = "critical";
+			};
+		};
+		cooling-maps {
+			ddr0_cooling_map {
+				trip = <&ddrhot>;
+				cooling-device = <&ddr_cool0 0 2>;
+				contribution = <1024>;
+			};
+			ddr1_cooling_map {
+				trip = <&ddrhot>;
+				cooling-device = <&ddr_cool1 0 2>;
+				contribution = <1024>;
+			};
+		};
+	};
+};
 
 &i2c0 {
 	status = "okay";
@@ -1486,9 +1526,9 @@
 
 &amlvecm {
 	status = "okay";
-	gamma_en = <1>;/*1:enabel ;0:disable*/
-	wb_en = <1>;/*1:enabel ;0:disable*/
-	cm_en = <1>;/*1:enabel ;0:disable*/
+	gamma_en = <1>;/*1:enable ;0:disable*/
+	wb_en = <1>;/*1:enable ;0:disable*/
+	cm_en = <1>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	ct_3dlut = <0>;
@@ -1640,8 +1680,9 @@
 &spicc1 {	//for UWB/LocalDimm
 	status = "disabled";
 	pinctrl-names = "default";
-	pinctrl-0 = <&spicc1_pins>;
-	cs-gpios = <&gpio GPIOH_24 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&spicc1_pins &spicc1_cs_pins>;
+	cs2clk-us = <2>;
+	clk2cs-us = <12>;
 };
 
 &spicc2 {

@@ -157,6 +157,11 @@
 			alloc-ranges = <0x0 0x05000000 0x0 0x400000>;
 		};
 
+		ramdump_bl33z@00000000 {
+			reg = <0x0 0x0 0x0 0x1800000>; /* 0 ~ 24M */
+			status = "disabled";
+		};
+
 		secos_reserved:linux,secos {
 			status = "disable";
 			compatible = "amlogic, aml_secos_memory";
@@ -165,11 +170,10 @@
 		};
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3f800000 0x0 0x800000>;
+			reg = <0x0 0x3f800000 0x0 0x800000>;
 		};
 
 		ion_cma_reserved:linux,ion-dev {
@@ -270,9 +274,9 @@
 		compatible = "amlogic, vecm";
 		dev_name = "aml_vecm";
 		status = "okay";
-		gamma_en = <0>;/*1:enabel ;0:disable*/
-		wb_en = <0>;/*1:enabel ;0:disable*/
-		cm_en = <0>;/*1:enabel ;0:disable*/
+		gamma_en = <0>;/*1:enable ;0:disable*/
+		wb_en = <0>;/*1:enable ;0:disable*/
+		cm_en = <0>;/*1:enable ;0:disable*/
 	};
 
 	multi-di {
@@ -340,7 +344,7 @@
 		compatible = "amlogic, dolby_vision_sm1";
 		dev_name = "aml_amdolby_vision_driver";
 		status = "okay";
-		tv_mode = <0>;/*1:enabel ;0:disable*/
+		tv_mode = <0>;/*1:enable ;0:disable*/
 	};
 
 	auge_sound {

@@ -84,61 +84,61 @@ extern int aml_demod_debug;
 #define DBG_ISDBT	BIT(8)
 #define DBG_TIME	BIT(9)
 
-#define PR_INFO(fmt, args ...)	printk("dtv_dmd:"fmt, ##args)
+#define PR_INFO(fmt, args ...)	pr_info("dtv_dmd:" fmt, ##args)
 
 #define PR_TIME(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_TIME) { \
-			printk("dtv_dmd:" fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_DBG(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_INFO) { \
-			printk("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_ATSC(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_ATSC) { \
-			printk("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_DVBC(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_DVBC) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_DVBT(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_DVBT) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_DVBS(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_DVBS) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_DTMB(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_DTMB) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
 #define PR_ISDBT(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_ISDBT) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
@@ -146,12 +146,12 @@ extern int aml_demod_debug;
 #define PR_DBGL(fmt, args ...) \
 	do { \
 		if (aml_demod_debug & DBG_LOOP) { \
-			pr_info("dtv_dmd:"fmt, ##args); \
+			pr_info("dtv_dmd:" fmt, ##args); \
 		} \
 	} while (0)
 
-#define PR_ERR(fmt, args ...) pr_err("dtv_dmd:"fmt, ## args)
-#define PR_WAR(fmt, args...)  pr_warn("dtv_dmd:" fmt, ## args)
+#define PR_ERR(fmt, args ...) pr_err("dtv_dmd:" fmt, ##args)
+#define PR_WAR(fmt, args...)  pr_warn("dtv_dmd:" fmt, ##args)
 
 
 enum demod_reg_mode {
@@ -236,18 +236,7 @@ unsigned int dvbt_set_ch(struct aml_dtvdemod *demod,
 		struct aml_demod_dvbt *demod_dvbt, struct dvb_frontend *fe);
 int dvbt2_set_ch(struct aml_dtvdemod *demod, struct dvb_frontend *fe);
 
-struct demod_status_ops {
-	int (*get_status)(void);
-	int (*get_ber)(void);
-	int (*get_snr)(struct aml_demod_sta *demod_sta);
-	int (*get_strength)(struct aml_demod_sta *demod_sta);
-	int (*get_ucblocks)(struct aml_demod_sta *demod_sta);
-};
-
-struct demod_status_ops *dvbt_get_status_ops(void);
-
 /* dvbc */
-
 int dvbc_set_ch(struct aml_dtvdemod *demod, struct aml_demod_dvbc *demod_dvbc,
 		struct dvb_frontend *fe);
 int dvbc_status(struct aml_dtvdemod *demod, struct aml_demod_sts *demod_sts,
@@ -292,7 +281,7 @@ void dtmb_reset(void);
 int dtmb_check_status_gxtv(struct dvb_frontend *fe);
 int dtmb_check_status_txl(struct dvb_frontend *fe);
 int dtmb_bch_check(struct dvb_frontend *fe);
-void dtmb_write_reg(int reg_addr, int reg_data);
+void dtmb_write_reg(unsigned int reg_addr, unsigned int reg_data);
 unsigned int dtmb_read_reg(unsigned int reg_addr);
 void dtmb_write_reg_bits(u32 addr, const u32 data, const u32 start, const u32 len);
 void dtmb_register_reset(void);
@@ -309,7 +298,7 @@ enum REG_DTMB_D9 {
 	DTMB_D9_ALL,
 };
 
-void dtmb_set_mem_st(int mem_start);
+void dtmb_set_mem_st(unsigned int mem_start);
 int dtmb_read_agc(enum REG_DTMB_D9 type, unsigned int *buf);
 unsigned int dtmb_reg_r_che_snr(void);
 unsigned int dtmb_reg_r_fec_lock(void);
@@ -609,7 +598,7 @@ void dvbt_isdbt_wr_bits_new(u32 reg_addr, const u32 reg_data,
 		    const u32 start, const u32 len);
 unsigned int dvbt_isdbt_rd_reg(unsigned int addr);
 unsigned int dvbt_isdbt_rd_reg_new(unsigned int addr);
-void dvbt_t2_wrb(unsigned int addr, char data);
+void dvbt_t2_wrb(unsigned int addr, unsigned char data);
 void dvbt_t2_write_w(unsigned int addr, unsigned int data);
 void dvbt_t2_wr_byte_bits(u32 addr, const u32 data, const u32 start, const u32 len);
 void dvbt_t2_wr_word_bits(u32 addr, const u32 data, const u32 start, const u32 len);
@@ -618,13 +607,13 @@ char dvbt_t2_rdb(unsigned int addr);
 void riscv_ctl_write_reg(unsigned int addr, unsigned int data);
 void dvbs_write_bits(u32 reg_addr, const u32 reg_data,
 		    const u32 start, const u32 len);
-void dvbs_wr_byte(unsigned int addr, char data);
-char dvbs_rd_byte(unsigned int addr);
+void dvbs_wr_byte(unsigned int addr, unsigned char data);
+unsigned char dvbs_rd_byte(unsigned int addr);
 int aml_demod_init(void);
 void aml_demod_exit(void);
 unsigned int write_riscv_ram(void);
 unsigned int dvbs_get_quality(void);
-void dvbs2_reg_initial(unsigned int symb_rate, unsigned int is_blind_scan);
+void dvbs2_reg_initial(unsigned int symb_rate_kbs, unsigned int is_blind_scan);
 int dvbs_get_signal_strength_off(void);
 void t3_revb_set_ambus_state(bool enable, bool is_t2);
 void t5w_write_ambus_reg(u32 addr,

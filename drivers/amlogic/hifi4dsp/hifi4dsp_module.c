@@ -40,7 +40,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/pm_domain.h>
 #include <linux/amlogic/scpi_protocol.h>
-
+#include <linux/compat.h>
 #include "hifi4dsp_api.h"
 #include "hifi4dsp_priv.h"
 #include "hifi4dsp_firmware.h"
@@ -271,8 +271,10 @@ static long hifi4dsp_miscdev_unlocked_ioctl(struct file *fp, unsigned int cmd,
 			 usrinfo->fw_name);
 	break;
 	case HIFI4DSP_SHM_CLEAN:
+		if (!strcmp(get_hifi_fw_mem_type(), "sram"))
+			break;
 		ret = copy_from_user(&shminfo, argp, sizeof(shminfo));
-		pr_debug("%s clean cache, addr:%u, size:%u\n",
+		pr_debug("%s clean cache, addr:0x%x, size:0x%x\n",
 			 __func__, shminfo.addr, shminfo.size);
 		dma_sync_single_for_device
 								(priv->dev,
@@ -281,8 +283,10 @@ static long hifi4dsp_miscdev_unlocked_ioctl(struct file *fp, unsigned int cmd,
 								 DMA_TO_DEVICE);
 	break;
 	case HIFI4DSP_SHM_INV:
+		if (!strcmp(get_hifi_fw_mem_type(), "sram"))
+			break;
 		ret = copy_from_user(&shminfo, argp, sizeof(shminfo));
-		pr_debug("%s invalidate cache, addr:%u, size:%u\n",
+		pr_debug("%s invalidate cache, addr:0x%x, size:0x%x\n",
 			 __func__, shminfo.addr, shminfo.size);
 		dma_sync_single_for_device(priv->dev,
 					   shminfo.addr,
@@ -491,15 +495,19 @@ static enum dsp_health get_dsp_health_status(unsigned long online)
 	case DSPA_ONLINE:
 		this_cnt[DSPA] = readl(hifi4dsp_p[DSPA]->dsp->status_reg);
 		pr_debug("[%s]dspa[%u %u]\n", __func__, last_cnt[DSPA], this_cnt[DSPA]);
-		if (this_cnt[DSPA] == last_cnt[DSPA])
+		if (this_cnt[DSPA] == last_cnt[DSPA]) {
+			hifi4dsp_p[DSPA]->dsp->dsphang = 1;
 			ret = DSPA_HANG;
+		}
 		last_cnt[DSPA] = this_cnt[DSPA];
 		break;
 	case DSPB_ONLINE:
 		this_cnt[DSPB] = readl(hifi4dsp_p[DSPB]->dsp->status_reg);
 		pr_debug("[%s]dspb[%u %u]\n", __func__, last_cnt[DSPB], this_cnt[DSPB]);
-		if (this_cnt[DSPB] == last_cnt[DSPB])
+		if (this_cnt[DSPB] == last_cnt[DSPB]) {
+			hifi4dsp_p[DSPB]->dsp->dsphang = 1;
 			ret = DSPB_HANG;
+		}
 		last_cnt[DSPB] = this_cnt[DSPB];
 		break;
 	case DSPAB_ONLINE:
@@ -507,12 +515,22 @@ static enum dsp_health get_dsp_health_status(unsigned long online)
 		this_cnt[DSPB] = readl(hifi4dsp_p[DSPB]->dsp->status_reg);
 		pr_debug("[%s]dspa[%u %u]dspb[%u %u]\n", __func__,
 			last_cnt[DSPA], this_cnt[DSPA], last_cnt[DSPB], this_cnt[DSPB]);
-		if (this_cnt[DSPA] == last_cnt[DSPA] && this_cnt[DSPB] == last_cnt[DSPB])
+		if (this_cnt[DSPA] == last_cnt[DSPA] && this_cnt[DSPB] == last_cnt[DSPB]) {
+			hifi4dsp_p[DSPA]->dsp->dsphang = 1;
+			hifi4dsp_p[DSPB]->dsp->dsphang = 1;
 			ret = DSPAB_HANG;
-		else if (this_cnt[DSPA] == last_cnt[DSPA])
+		} else if (this_cnt[DSPA] == last_cnt[DSPA]) {
+			hifi4dsp_p[DSPA]->dsp->dsphang = 1;
+			hifi4dsp_p[DSPB]->dsp->dsphang = 0;
 			ret = DSPA_HANG;
-		else if (this_cnt[DSPB] == last_cnt[DSPB])
+		} else if (this_cnt[DSPB] == last_cnt[DSPB]) {
+			hifi4dsp_p[DSPA]->dsp->dsphang = 0;
+			hifi4dsp_p[DSPB]->dsp->dsphang = 1;
 			ret = DSPB_HANG;
+		} else {
+			hifi4dsp_p[DSPA]->dsp->dsphang = 0;
+			hifi4dsp_p[DSPB]->dsp->dsphang = 0;
+		}
 		last_cnt[DSPA] = this_cnt[DSPA];
 		last_cnt[DSPB] = this_cnt[DSPB];
 		break;
@@ -529,27 +547,19 @@ static void dsp_health_monitor(struct work_struct *work)
 
 	switch (get_dsp_health_status(dsp_online)) {
 	case DSP_GOOD:
-		hifi4dsp_p[DSPA]->dsp->dsphang = 0;
-		hifi4dsp_p[DSPB]->dsp->dsphang = 0;
 		break;
 	case DSPA_HANG:
 		snprintf(data, sizeof(data), "ACTION=DSP_WTD_A");
-		hifi4dsp_p[DSPA]->dsp->dsphang = 1;
-		hifi4dsp_p[DSPB]->dsp->dsphang = 0;
 		kobject_uevent_env(&hifi4dsp_p[DSPA]->dsp->dev->kobj, KOBJ_CHANGE, envp);
 		pr_debug("[%s][DSPA_HANG]\n", __func__);
 		break;
 	case DSPB_HANG:
 		snprintf(data, sizeof(data), "ACTION=DSP_WTD_B");
-		hifi4dsp_p[DSPA]->dsp->dsphang = 0;
-		hifi4dsp_p[DSPB]->dsp->dsphang = 1;
 		kobject_uevent_env(&hifi4dsp_p[DSPB]->dsp->dev->kobj, KOBJ_CHANGE, envp);
 		pr_debug("[%s][DSPB_HANG]\n", __func__);
 		break;
 	case DSPAB_HANG:
 		snprintf(data, sizeof(data), "ACTION=DSP_WTD_WHOLE");
-		hifi4dsp_p[DSPA]->dsp->dsphang = 1;
-		hifi4dsp_p[DSPB]->dsp->dsphang = 1;
 		kobject_uevent_env(&hifi4dsp_p[DSPA]->dsp->dev->kobj, KOBJ_CHANGE, envp);
 		pr_debug("[%s][DSPAB_HANG]\n", __func__);
 		break;
@@ -999,6 +1009,8 @@ void get_dsp_baseaddr(struct platform_device *pdev)
 	g_regbases.dspa_addr = devm_ioremap_resource(&pdev->dev, res);
 	g_regbases.rega_size = resource_size(res);
 
+	if (pdev->num_resources < 2)
+		return;
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (!res) {
 		dev_err(&pdev->dev, "failed to get dspb base address\n");
@@ -1006,14 +1018,6 @@ void get_dsp_baseaddr(struct platform_device *pdev)
 	}
 	g_regbases.dspb_addr = devm_ioremap_resource(&pdev->dev, res);
 	g_regbases.regb_size = resource_size(res);
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
-	if (!res) {
-		dev_err(&pdev->dev, "failed to get dsp hiu address\n");
-		return;
-	}
-	//g_regbases.hiu_addr = devm_ioremap_resource(&pdev->dev, res);
-	g_regbases.hiu_addr = ioremap_nocache(res->start, resource_size(res));
 }
 
 void get_dsp_statusreg(struct platform_device *pdev, int dsp_cnt,
@@ -1022,6 +1026,8 @@ void get_dsp_statusreg(struct platform_device *pdev, int dsp_cnt,
 	struct resource *res;
 	int i;
 
+	if (pdev->num_resources < 3)
+		return;
 	for (i = 0; i < dsp_cnt; i++) {
 		res = platform_get_resource(pdev, IORESOURCE_MEM, 2 + i);
 		if (!res) {
@@ -1082,12 +1088,11 @@ static int get_hifi_firmware_mem(struct reserved_mem *fwmem, struct platform_dev
 	struct page *cma_pages = NULL;
 	u32 dspsrambase = 0, dspsramsize = 0;
 
-	/*parse sram fwmem*/
+	/*parse sram fwmem preferentially*/
 	ret = of_property_read_u32(pdev->dev.of_node, "dspsrambase", &dspsrambase);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Can't retrieve srambase\n");
+	if (ret < 0)
 		goto parse_cma;
-	}
+
 	pr_debug("of read dspsrambase=0x%08x\n", dspsrambase);
 
 	ret = of_property_read_u32(pdev->dev.of_node, "dspsramsize", &dspsramsize);
@@ -1140,6 +1145,8 @@ static int get_hifi_share_mem(struct reserved_mem *shmem, struct platform_device
 {
 	struct resource *dsp_shm_res;
 
+	if (pdev->num_resources < 5)
+		return -1;
 	/*parse shmem*/
 	dsp_shm_res = platform_get_resource(pdev, IORESOURCE_MEM, 4);
 	if (!dsp_shm_res) {
@@ -1468,8 +1475,8 @@ static int hifi4dsp_platform_probe(struct platform_device *pdev)
 	pr_debug("%s of read dspboffset=0x%08x\n", __func__, dspboffset);
 
 	ret = of_property_read_u32(np, "dsp-monitor-period-ms", &dsp_monitor_period_ms);
-	if (ret < 0)
-		dev_err(&pdev->dev, "Can't retrieve dsp-monitor-period-ms\n");
+	if (ret && ret != -EINVAL)
+		dev_err(&pdev->dev, "of get dsp-monitor-period-ms property failed\n");
 
 	/*boot from DDR or SRAM or ...*/
 	ret = of_property_read_u32(np, "bootlocation", &bootlocation);
@@ -1500,19 +1507,19 @@ static int hifi4dsp_platform_probe(struct platform_device *pdev)
 	}
 
 	ret = of_property_read_u32_array(np, "optimize_longcall", &optimize_longcall[0], 2);
-	if (ret)
-		pr_debug("can't get optimize_longcall\n");
+	if (ret && ret != -EINVAL)
+		dev_err(&pdev->dev, "of get optimize_longcall property failed\n");
 	ret = of_property_read_u32_array(np, "sram_remap_addr", &sram_remap_addr[0], 4);
-	if (ret)
-		pr_debug("can't get sram_remap_addr\n");
+	if (ret && ret != -EINVAL)
+		dev_err(&pdev->dev, "of get sram_remap_addr property failed\n");
 	ret = of_property_read_u32_array(np, "suspend_resume_support", &pm_support[0], 2);
-	if (ret)
-		pr_debug("can't get suspend_resume_support\n");
+	if (ret && ret != -EINVAL)
+		dev_err(&pdev->dev, "of get suspend_resume_support property failed\n");
 
 	ret = of_property_read_u32(np, "logbuff-polling-period-ms",
 			&dsp_logbuff_polling_period_ms);
-	if (ret < 0)
-		dev_err(&pdev->dev, "Can't retrieve logbuff-polling-period-ms\n");
+	if (ret && ret != -EINVAL)
+		dev_err(&pdev->dev, "of get logbuff-polling-period-ms property failed\n");
 
 	/*init hifi4dsp_dsp*/
 	dsp = kcalloc(dsp_cnt, sizeof(*dsp), GFP_KERNEL);

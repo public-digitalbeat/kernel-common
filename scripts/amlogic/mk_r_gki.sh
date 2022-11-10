@@ -32,7 +32,7 @@ fi
 ###########################################################################################
 echo "######################## step 1:  env setup ###############################################"
 export PATH=/opt/clang-r383902/bin/:/opt/gcc-linaro-6.3.1-2017.02-x86_64_aarch64-linux-gnu/bin/:$PATH
-MAKE_CLANG='make ARCH=arm64 CC=clang HOSTCC=clang LD=ld.lld NM=llvm-nm OBJCOPY=llvm-objcopy CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- -j8'
+MAKE_CLANG='make ARCH=arm64 LLVM=1 CC=clang HOSTCC=clang LD=ld.lld NM=llvm-nm OBJCOPY=llvm-objcopy CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- -j32'
 export INSTALL_MOD_PATH=./modules_install
 
 find -type f | grep "\.ko$" | xargs rm -fr
@@ -108,10 +108,8 @@ echo KERNEL_SRC=$KERNEL_SRC
 if [[ -z "${SKIP_EXT_MODULES}" ]] && [[ -n "${EXT_MODULES}" ]]; then
 
   for EXT_MOD in ${EXT_MODULES}; do
-    EXT_MOD=`readlink -f $EXT_MOD`
-    M=`echo $KERNEL_SRC | sed 's#/[^/]*#../#g'`$EXT_MOD
     set -ex
-    $MAKE_CLANG -C ${EXT_MOD} M=${M} KERNEL_SRC=${KERNEL_SRC}
+    $MAKE_CLANG -C ${EXT_MOD} M=${EXT_MOD} KERNEL_SRC=${KERNEL_SRC}
     set +ex
   done
 fi

@@ -83,53 +83,69 @@ static size_t c1_dmc_dump_reg(char *buf)
 
 static void check_violation(struct dmc_monitor *mon, void *data)
 {
-	int i, port, subport;
-	unsigned long addr, status;
+	int port, subport;
+	unsigned long addr = 0, status = 0, irqreg;
 	struct page *page;
 	struct page_trace *trace;
 	char title[10] = "";
 
-	for (i = 1; i < 4; i += 2) {
-		status = dmc_prot_rw(NULL, DMC_VIO_ADDR0 + (i << 2), 0, DMC_READ);
-		if (!(status & PROT0_VIOLATION))
-			continue;
-		addr = dmc_prot_rw(NULL, DMC_VIO_ADDR0 + ((i - 1) << 2), 0,
-				   DMC_READ);
-		if (addr > mon->addr_end)
-			continue;
-
-		/* ignore violation on same page/same port */
-		if ((addr & PAGE_MASK) == mon->last_addr &&
-		    status == mon->last_status) {
-			mon->same_page++;
-			if (mon->debug & DMC_DEBUG_CMA)
-				sprintf(title, "%s", "_SAME");
-			else
-				continue;
-		}
-		/* ignore cma driver pages */
-		page = phys_to_page(addr);
-		trace = find_page_base(page);
-		if (trace && trace->migrate_type == MIGRATE_CMA) {
-			if (mon->debug & DMC_DEBUG_CMA)
-				sprintf(title, "%s", "_CMA");
-			else
-				continue;
-		}
-
-		port = status & 0x1f;
-		subport = (status >> 9) & 0x7;
-		if (port == 16)
-			port = subport + 9;
-		pr_emerg(DMC_TAG "%s, addr:%08lx, s:%08lx, ID:%s, sub:%d, c:%ld, d:%p\n",
-			 title, addr, status, to_ports(port), subport,
-			 mon->same_page, data);
-		show_violation_mem(addr);
-
-		mon->same_page   = 0;
-		mon->last_addr   = addr & PAGE_MASK;
-		mon->last_status = status;
+	irqreg = dmc_prot_rw(NULL, DMC_SEC_STATUS, 0, DMC_READ);
+	if (irqreg & DMC_WRITE_VIOLATION) {
+		status = dmc_prot_rw(NULL, DMC_VIO_ADDR1, 0, DMC_READ);
+		addr = dmc_prot_rw(NULL, DMC_VIO_ADDR0, 0, DMC_READ);
 	}
+	if (irqreg & DMC_READ_VIOLATION) {
+		status = dmc_prot_rw(NULL, DMC_VIO_ADDR3 + (1 << 2), 0, DMC_READ);
+		addr = dmc_prot_rw(NULL, DMC_VIO_ADDR2, 0, DMC_READ);
+	}
+
+	if (!(status & PROT0_VIOLATION))
+		return;
+
+	if (addr > mon->addr_end)
+		return;
+
+	/* ignore violation on same page/same port */
+	if ((addr & PAGE_MASK) == mon->last_addr &&
+		status == mon->last_status) {
+		mon->same_page++;
+		if (mon->debug & DMC_DEBUG_CMA)
+			sprintf(title, "%s", "_SAME");
+		else
+			return;
+	}
+	/* ignore cma driver pages */
+	page = phys_to_page(addr);
+	trace = find_page_base(page);
+	if (trace && trace->migrate_type == MIGRATE_CMA) {
+		if (mon->debug & DMC_DEBUG_CMA)
+			sprintf(title, "%s", "_CMA");
+		else
+			return;
+	}
+
+	port = status & 0x1f;
+	subport = (status >> 9) & 0x7;
+	if (port == 16)
+		port = subport + 9;
+
+	if ((mon->debug & DMC_DEBUG_CMA) == 0) {
+		if (strstr(to_ports(port), "EMMC"))
+			return;
+		if (strstr(to_ports(port), "USB"))
+			return;
+		if (strstr(to_ports(port), "ETH"))
+			return;
+	}
+
+	pr_emerg(DMC_TAG "%s, addr:%08lx, s:%08lx, ID:%s, sub:%d, c:%ld, d:%p\n",
+			title, addr, status, to_ports(port), subport,
+			mon->same_page, data);
+	show_violation_mem(addr);
+
+	mon->same_page   = 0;
+	mon->last_addr   = addr & PAGE_MASK;
+	mon->last_status = status;
 }
 
 static void c1_dmc_mon_irq(struct dmc_monitor *mon, void *data)
@@ -151,14 +167,16 @@ static void c1_dmc_mon_irq(struct dmc_monitor *mon, void *data)
 static int c1_dmc_mon_set(struct dmc_monitor *mon)
 {
 	unsigned long add;
+	unsigned int wb;
 
+	wb = mon->addr_start & 0x01;
 	add = mon->addr_start & PAGE_MASK;
 	dmc_prot_rw(NULL, DMC_PROT0_STA, add, DMC_WRITE);
 	add = mon->addr_end & PAGE_MASK;
 	dmc_prot_rw(NULL, DMC_PROT0_EDA, add, DMC_WRITE);
 
 	dmc_prot_rw(NULL, DMC_PROT0_CTRL, mon->device, DMC_WRITE);
-	dmc_prot_rw(NULL, DMC_PROT0_CTRL1, 1 << 24, DMC_WRITE);
+	dmc_prot_rw(NULL, DMC_PROT0_CTRL1, wb << 25 | 1 << 24, DMC_WRITE);
 
 	pr_emerg("range:%08lx - %08lx, device:%llx\n",
 		 mon->addr_start, mon->addr_end, mon->device);

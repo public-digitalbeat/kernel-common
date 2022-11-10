@@ -24,13 +24,11 @@
 #include <linux/amlogic/media/vfm/vframe.h>
 #include "linux/amlogic/media/amvecm/ve.h"
 
-//Ref.2021/1118: chg frc set max line to vlock module
+#define VLOCK_VER "Ref.2022/0615: fix T3 Rev B black screen"
 
-// #define VLOCK_VER "Ref.2021/1207: hdmi black screen low probility"
-#define VLOCK_VER "Ref.2022/0401: add vfp protect"
-
-#define VLOCK_REG_NUM	33
-#define VLOCK_ALL_LOCK_CNT	400
+#define VLOCK_REG_NUM					33
+#define VLOCK_ALL_LOCK_CNT				400
+#define VLOCK_V_FRONT_PORCH_REV_B		2	/*T3 evB chip*/
 
 struct vdin_sts {
 	unsigned int lcnt_sts;
@@ -192,6 +190,8 @@ struct stvlock_frc_param {
 	u32 max_lncnt;
 	u32 max_pxcnt;
 	u32 frc_v_porch;
+	u32 frc_mcfixlines;
+	unsigned char s2l_en;
 };
 
 #define diff(a, b) ({ \
@@ -306,6 +306,7 @@ enum vlock_pll_sel {
 #define VLOCK_DEBUG_FSM_PAUSE (0x40)
 #define VLOCK_DEBUG_FORCE_ON (0x80)
 #define VLOCK_DEBUG_FLASH (0x100)
+#define VLOCK_DEBUG_PROTECT (0x200)
 
 #define VLOCK_DEBUG_INFO_ERR	(BIT(15))
 

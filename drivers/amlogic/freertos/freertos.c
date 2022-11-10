@@ -32,14 +32,16 @@
 #include <linux/sched/signal.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/amlogic/freertos.h>
+#include <linux/mm.h>
 
 #define AML_RTOS_NAME "freertos"
 
 #define SIP_FREERTOS_FID		0x8200004B
 #define RTOS_REQUEST_INFO		0
 #define RTOS_ALLOW_COREUP		1
-#define SMC_UNK				0xffffffff
+#define SMC_UNK				-1
 #define RSVED_MAX_IRQ			1024
+#define RTOS_RUN_FLAG			0xA5A5A5A5
 
 #define LOGBUF_RDFLG	0x80000000
 struct logbuf_t {
@@ -48,6 +50,7 @@ struct logbuf_t {
 	char buf[0];
 };
 
+static struct reserved_mem res_mem;
 static unsigned long rtosinfo_phy;
 static struct xrtosinfo_t *rtosinfo;
 static int freertos_finished;
@@ -61,6 +64,28 @@ static u32 logbuf_len;
 static struct logbuf_t *logbuf;
 static struct dentry *rtos_logbuf_file;
 static DEFINE_MUTEX(freertos_logbuf_lock);
+
+static BLOCKING_NOTIFIER_HEAD(rtos_nofitier_chain);
+
+int register_freertos_notifier(struct notifier_block *nb)
+{
+	int err;
+
+	err = blocking_notifier_chain_register(&rtos_nofitier_chain, nb);
+	return err;
+}
+EXPORT_SYMBOL_GPL(register_freertos_notifier);
+
+int unregister_freertos_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&rtos_nofitier_chain, nb);
+}
+EXPORT_SYMBOL(unregister_freertos_notifier);
+
+static int call_freertos_notifiers(unsigned long val, void *v)
+{
+	return blocking_notifier_call_chain(&rtos_nofitier_chain, val, v);
+}
 
 static unsigned long freertos_request_info(void)
 {
@@ -87,6 +112,8 @@ static unsigned long freertos_request_info(void)
 		return 0;
 	}
 	info_base = rmem->base;
+	res_mem.base = rmem->base;
+	res_mem.size = rmem->size;
 
 	freertos = of_find_compatible_node(NULL, NULL, "amlogic,freertos");
 	if (!freertos) {
@@ -102,6 +129,30 @@ static unsigned long freertos_request_info(void)
 
 	return (info_base + info_offset);
 }
+
+unsigned int freertos_is_run(void)
+{
+	unsigned long phy;
+	struct xrtosinfo_t *info;
+
+	phy = freertos_request_info();
+	if (!phy)
+		return 0;
+
+	info = (struct xrtosinfo_t *)memremap(phy, sizeof(struct xrtosinfo_t), MEMREMAP_WB);
+	if (info) {
+		if (info->rtos_run_flag != RTOS_RUN_FLAG) {
+			pr_debug("rtos_run_flag:%x\n", info->rtos_run_flag);
+			return 0;
+		}
+	} else {
+		pr_err("%s,map freertos info failed\n", __func__);
+		return 0;
+	}
+	iounmap(info);
+	return 1;
+}
+EXPORT_SYMBOL(freertos_is_run);
 
 /*T7 need not update info to bl31
  * static unsigned long freertos_allow_coreup(void)
@@ -182,7 +233,7 @@ static void freertos_coreup(int cpu, int bootup)
 {
 	if (bootup) {
 		pr_debug("cpu %u power on start\n", cpu);
-		if (device_online(get_cpu_device(cpu)))
+		if (!device_online(get_cpu_device(cpu)))
 			pr_info("cpu %u power on success\n", cpu);
 		else
 			pr_err("cpu %u power on failed\n", cpu);
@@ -213,6 +264,11 @@ static void freertos_do_finish(int bootup)
 				} else {
 					pr_info("cpu %u already take over\n", cpu);
 				}
+				free_reserved_area(__va(res_mem.base),
+					__va(PAGE_ALIGN(res_mem.base + res_mem.size)),
+						   0,
+						   "free_mem");
+				call_freertos_notifiers(1, NULL);
 			}
 		}
 //done:
@@ -387,7 +443,7 @@ static int aml_rtos_logbuf_init(void)
 	size = rtosinfo->logbuf_len;
 	pr_info("logbuffer: 0x%x, 0x%x\n",
 		rtosinfo->logbuf_phy, rtosinfo->logbuf_len);
-	logbuf = ioremap_cache(phy, size);
+	logbuf = memremap(phy, size, MEMREMAP_WB);
 	if (!logbuf) {
 		pr_err("map log buffer failed\n");
 		return -1;
@@ -410,18 +466,76 @@ static void aml_rtos_logbuf_deinit(void)
 	}
 }
 
+static ssize_t android_status_store(struct class *cla,
+			  struct class_attribute *attr,
+			  const char *buf, size_t count)
+{
+	long val = 0;
+
+	if (kstrtoul(buf, 0, &val)) {
+		pr_err("invalid input:%s\n", buf);
+		return count;
+	}
+
+	pr_info("set android_status is %ld\n", val);
+	rtosinfo->android_status = val;
+
+	return count;
+}
+
+static ssize_t android_status_show(struct class *cla,
+			 struct class_attribute *attr, char *buf)
+{
+	int cnt = 0;
+
+	cnt =  sprintf(buf, "%d\n", rtosinfo->android_status);
+
+	return cnt;
+}
+static CLASS_ATTR_RW(android_status);
+
+static ssize_t ipi_send_store(struct class *cla,
+			  struct class_attribute *attr,
+			  const char *buf, size_t count)
+{
+	long cpu = 0;
+
+	if (kstrtoul(buf, 0, &cpu)) {
+		pr_err("invalid input cpu number:%s\n", buf);
+		return count;
+	}
+
+	pr_info("set ipi to cpu%ld\n", cpu);
+	arch_send_ipi_rtos(cpu);
+
+	return count;
+}
+static CLASS_ATTR_WO(ipi_send);
+
+static struct attribute *freertos_attrs[] = {
+	&class_attr_android_status.attr,
+	&class_attr_ipi_send.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(freertos);
+
+static struct class freertos_class = {
+	.name = "freertos",
+	.class_groups = freertos_groups,
+};
+
 static int aml_rtos_probe(struct platform_device *pdev)
 {
 	rtos_debug_dir = debugfs_create_dir("freertos", NULL);
 	rtosinfo_phy = freertos_request_info();
 	pr_info("rtosinfo_phy=%lx\n", rtosinfo_phy);
 	if (rtosinfo_phy == 0 ||
-	    rtosinfo_phy == SMC_UNK)
+	    (int)rtosinfo_phy == SMC_UNK)
 		return 0;
 
-	rtosinfo = (struct xrtosinfo_t *)
-		   ioremap(rtosinfo_phy,
-			   sizeof(struct xrtosinfo_t));
+	rtosinfo = (struct xrtosinfo_t *)memremap(rtosinfo_phy,
+						  sizeof(struct xrtosinfo_t),
+						  MEMREMAP_WB);
 	if (rtosinfo) {
 		freertos_do_finish(1);
 	} else {
@@ -429,6 +543,12 @@ static int aml_rtos_probe(struct platform_device *pdev)
 		goto finish;
 	}
 
+	if (rtosinfo->rtos_run_flag == RTOS_RUN_FLAG) {
+		if (class_register(&freertos_class)) {
+			pr_err("regist freertos_class failed\n");
+			return -EINVAL;
+		}
+	}
 	aml_rtos_logbuf_init();
 
 finish:
@@ -467,7 +587,7 @@ static void freertos_get_irqrsved(void)
 	struct device_node *np;
 	const __be32 *irqrsv;
 	u32 len, irq;
-	unsigned long tmp;
+	unsigned int tmp;
 	int i;
 
 	mutex_lock(&freertos_lock);
@@ -475,9 +595,8 @@ static void freertos_get_irqrsved(void)
 		goto exit;
 	freertos_irqrsv_inited = 1;
 
-	tmp = freertos_request_info();
-	if (tmp == 0 ||
-	    tmp == SMC_UNK)
+	tmp = freertos_is_run();
+	if (!tmp)
 		goto exit;
 
 	np = of_find_matching_node_and_match(NULL,

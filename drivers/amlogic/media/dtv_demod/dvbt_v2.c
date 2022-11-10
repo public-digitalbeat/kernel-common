@@ -623,7 +623,7 @@ void ofdm_initial(int bandwidth,
 	if (mode == 0)		/* DVBT */
 		dvbt_isdbt_wr_reg((0x5c << 2), 0x00001011);	/*  */
 	else
-		dvbt_isdbt_wr_reg((0x5c << 2), 0x00000753);
+		dvbt_isdbt_wr_reg((0x5c << 2), 0x00000453); // Q_threshold
 	/* ICFO_EST_CTRL ISDBT ICFO thres = 2 */
 
 	dvbt_isdbt_wr_reg((0x5f << 2), 0x0ffffe10);
@@ -705,48 +705,6 @@ void ofdm_initial(int bandwidth,
 void calculate_cordic_para(void)
 {
 	dvbt_isdbt_wr_reg(0x0c, 0x00000040);
-}
-
-static int dvbt_get_status(void)
-{
-	return dvbt_isdbt_rd_reg(0x0) >> 12 & 1;
-}
-
-static int dvbt_get_ber(void)
-{
-	return dvbt_isdbt_rd_reg((0xbf << 2));
-}
-
-static int dvbt_get_snr(struct aml_demod_sta *demod_sta)
-{
-	return ((dvbt_isdbt_rd_reg((0x0a << 2))) >> 20) & 0x3ff;
-	/*dBm: bit0~bit2=decimal */
-}
-
-static int dvbt_get_strength(struct aml_demod_sta *demod_sta)
-{
-/* int dbm = dvbt_get_ch_power(demod_sta, demod_i2c); */
-/* return dbm; */
-	return 0;
-}
-
-static int dvbt_get_ucblocks(struct aml_demod_sta *demod_sta)
-{
-	return 0;
-/* return dvbt_get_per(); */
-}
-
-struct demod_status_ops *dvbt_get_status_ops(void)
-{
-	static struct demod_status_ops ops = {
-		.get_status = dvbt_get_status,
-		.get_ber = dvbt_get_ber,
-		.get_snr = dvbt_get_snr,
-		.get_strength = dvbt_get_strength,
-		.get_ucblocks = dvbt_get_ucblocks,
-	};
-
-	return &ops;
 }
 
 struct st_chip_register_t {
@@ -1172,7 +1130,23 @@ void dvbt2_riscv_init(struct aml_dtvdemod *demod, struct dvb_frontend *fe)
 		dvbt_t2_wrb(0x2835, 0x07);
 		break;
 
+	case BANDWIDTH_6_MHZ:
+		dvbt_t2_wrb(0x1c, 0x6);
+		dvbt_t2_wrb(0x2835, 0x0e);
+		break;
+
+	case BANDWIDTH_5_MHZ:
+		dvbt_t2_wrb(0x1c, 0x5);
+		dvbt_t2_wrb(0x2835, 0x0e);
+		break;
+
+	case BANDWIDTH_1_712_MHZ:
+		dvbt_t2_wrb(0x1c, 0x1);
+		dvbt_t2_wrb(0x2835, 0x0e);
+		break;
+
 	default:
+		/* default 8M */
 		dvbt_t2_wrb(0x1c, 0x8);
 		dvbt_t2_wrb(0x2835, 0x0e);
 		break;

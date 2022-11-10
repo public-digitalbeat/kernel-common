@@ -623,17 +623,23 @@ static struct clk_regmap t7_gp0_pll = {
 
 #ifdef CONFIG_ARM
 static const struct pll_params_table t7_gp1_pll_table[] = {
-	PLL_PARAMS(200, 1, 2), /*DCO=4800M OD=1200M*/
+	PLL_PARAMS(100, 1, 1), /*DCO=4800M OD=1200M*/
 	PLL_PARAMS(125, 1, 1), /*DCO=3000M OD=1500M*/
 	{ /* sentinel */  }
 };
 #else
 static const struct pll_params_table t7_gp1_pll_table[] = {
-	PLL_PARAMS(200, 1), /*DCO=4800M OD=1200M*/
+	PLL_PARAMS(100, 1), /*DCO=4800M OD=1200M*/
 	PLL_PARAMS(125, 1), /*DCO=3000M OD=1500M*/
 	{ /* sentinel */  }
 };
 #endif
+
+static const struct reg_sequence t7_gp1_init_regs[] = {
+	{ .reg = ANACTRL_GP1PLL_CTRL1,	.def = 0x1420500f },
+	{ .reg = ANACTRL_GP1PLL_CTRL2,	.def = 0x00023001 },
+	{ .reg = ANACTRL_GP1PLL_CTRL3,	.def = 0x0, .delay_us = 20 },
+};
 
 static struct clk_regmap t7_gp1_pll_dco = {
 	.data = &(struct meson_clk_pll_data){
@@ -649,14 +655,17 @@ static struct clk_regmap t7_gp1_pll_dco = {
 		},
 		.n = {
 			.reg_off = ANACTRL_GP1PLL_CTRL0,
-			.shift   = 10,
+			.shift   = 16,
 			.width   = 5,
 		},
-		.frac = {
-			.reg_off = ANACTRL_GP1PLL_CTRL1,
-			.shift   = 0,
-			.width   = 19,
+#ifdef CONFIG_ARM
+		/* od for 32bit */
+		.od = {
+			.reg_off = ANACTRL_GP1PLL_CTRL0,
+			.shift	 = 12,
+			.width	 = 3,
 		},
+#endif
 		.l = {
 			.reg_off = ANACTRL_GP1PLL_CTRL0,
 			.shift   = 31,
@@ -668,10 +677,12 @@ static struct clk_regmap t7_gp1_pll_dco = {
 			.width   = 1,
 		},
 		.table = t7_gp1_pll_table,
+		.init_regs = t7_gp1_init_regs,
+		.init_count = ARRAY_SIZE(t7_gp1_init_regs)
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "gp1_pll_dco",
-		.ops = &meson_secure_clk_pll_ops,
+		.ops = &meson_clk_pll_ops,
 		.parent_data = &(const struct clk_parent_data) {
 			.fw_name = "xtal",
 		},
@@ -684,14 +695,14 @@ static struct clk_regmap t7_gp1_pll_dco = {
 static struct clk_regmap t7_gp1_pll = {
 	.data = &(struct clk_regmap_div_data){
 		.offset = ANACTRL_GP1PLL_CTRL0,
-		.shift = 16,
+		.shift = 12,
 		.width = 3,
 		.flags = (CLK_DIVIDER_POWER_OF_TWO |
 			  CLK_DIVIDER_ROUND_CLOSEST),
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "gp1_pll",
-		.ops = &clk_regmap_divider_ro_ops,
+		.ops = &clk_regmap_divider_ops,
 		.parent_hws = (const struct clk_hw *[]) {
 			&t7_gp1_pll_dco.hw
 		},
@@ -763,6 +774,7 @@ static struct clk_regmap t7_mclk_pll_dco = {
 		.table = t7_mclk_pll_table,
 		.init_regs = t7_mclk_init_regs,
 		.init_count = ARRAY_SIZE(t7_mclk_init_regs),
+		.ignore_init = false
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "mclk_pll_dco",
@@ -771,7 +783,7 @@ static struct clk_regmap t7_mclk_pll_dco = {
 			.fw_name = "xtal",
 		},
 		.num_parents = 1,
-		.flags = CLK_GET_RATE_NOCACHE | CLK_IS_CRITICAL
+		.flags = CLK_GET_RATE_NOCACHE | CLK_IGNORE_UNUSED
 	},
 };
 
@@ -808,7 +820,7 @@ static struct clk_regmap t7_mclk_pll = {
 		.offset = ANACTRL_MCLK_PLL_CNTL4,
 		.shift = 16,
 		.width = 5,
-		.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ROUND_CLOSEST,
+		.flags = CLK_DIVIDER_ONE_BASED | CLK_DIVIDER_ROUND_CLOSEST | CLK_DIVIDER_ALLOW_ZERO,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "mclk_pll",
@@ -823,7 +835,6 @@ static struct clk_regmap t7_mclk_pll = {
 
 /*a53 cpu_clk, get the table from ucode */
 static const struct cpu_dyn_table t7_cpu_dyn_table[] = {
-	CPU_LOW_PARAMS(24000000, 0, 0, 0),
 	CPU_LOW_PARAMS(100000000, 1, 1, 9),
 	CPU_LOW_PARAMS(250000000, 1, 1, 3),
 	CPU_LOW_PARAMS(333333333, 2, 1, 1),
@@ -998,10 +1009,16 @@ static int t7_sys_pll_notifier_cb(struct notifier_block *nb,
 		 *          \- sys_pll_dco
 		 */
 
-		/* Configure cpu_clk to use cpu_clk_dyn */
+		/*
+		 * Configure cpu_clk to use cpu_clk_dyn
+		 * Make sure cpu clk is 1G, cpu_clk_dyn may equal 24M
+		 */
+
+		if (clk_set_rate(nb_data->cpu_dyn_clk->clk, 1000000000))
+			pr_err("%s: set CPU dyn clock to 1G failed\n", __func__);
+
 		clk_hw_set_parent(nb_data->cpu_clk,
 				  nb_data->cpu_dyn_clk);
-
 		/*
 		 * Now, cpu_clk uses the dyn path
 		 * cpu_clk
@@ -1012,8 +1029,7 @@ static int t7_sys_pll_notifier_cb(struct notifier_block *nb,
 		 *                      \- xtal/fclk_div2/fclk_div3
 		 *                   \- xtal/fclk_div2/fclk_div3
 		 */
-
-		udelay(100);
+		udelay(5);
 
 		return NOTIFY_OK;
 
@@ -1026,8 +1042,7 @@ static int t7_sys_pll_notifier_cb(struct notifier_block *nb,
 		/* Configure cpu_clk to use sys_pll */
 		clk_hw_set_parent(nb_data->cpu_clk,
 				  nb_data->sys_pll);
-
-		udelay(100);
+		udelay(5);
 
 		/* new path :
 		 * cpu_clk
@@ -1058,12 +1073,12 @@ static struct t7_sys_pll_nb_data t7_sys_pll_nb_data = {
 
 #ifdef CONFIG_ARM
 static const struct pll_params_table t7_hifi_pll_table[] = {
-	PLL_PARAMS(150, 1, 1), /* DCO = 1806.336M OD = 1 */
+	PLL_PARAMS(163, 1, 1), /* DCO = 3932.16M */
 	{ /* sentinel */  }
 };
 #else
 static const struct pll_params_table t7_hifi_pll_table[] = {
-	PLL_PARAMS(150, 1), /* DCO = 1806.336M */
+	PLL_PARAMS(163, 1), /* DCO = 3932.16M */
 	{ /* sentinel */  }
 };
 #endif
@@ -1072,7 +1087,7 @@ static const struct pll_params_table t7_hifi_pll_table[] = {
  * Internal hifi pll emulation configuration parameters
  */
 static const struct reg_sequence t7_hifi_init_regs[] = {
-	{ .reg = ANACTRL_HIFIPLL_CTRL1,	.def = 0x00010e56 },
+	{ .reg = ANACTRL_HIFIPLL_CTRL1,	.def = 0x00014820 }, /*frac = 20.16M */
 	{ .reg = ANACTRL_HIFIPLL_CTRL2,	.def = 0x00000000 },
 	{ .reg = ANACTRL_HIFIPLL_CTRL3,	.def = 0x6a285c00 },
 	{ .reg = ANACTRL_HIFIPLL_CTRL4,	.def = 0x65771290 },
@@ -1116,6 +1131,7 @@ static struct clk_regmap t7_hifi_pll_dco = {
 		.init_regs = t7_hifi_init_regs,
 		.init_count = ARRAY_SIZE(t7_hifi_init_regs),
 		.flags = CLK_MESON_PLL_ROUND_CLOSEST,
+		.new_frac = 1,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "hifi_pll_dco",
@@ -5450,7 +5466,7 @@ static struct clk_regmap t7_ge2d_gate = {
 		.ops = &clk_regmap_gate_ops,
 		.parent_hws = (const struct clk_hw *[]) { &t7_vapb.hw },
 		.num_parents = 1,
-		.flags = CLK_SET_RATE_PARENT,
+		.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
 	},
 };
 
@@ -8248,6 +8264,11 @@ static struct regmap *t7_regmap_resource(struct device *dev, char *name)
 	return devm_regmap_init_mmio(dev, base, &clkc_regmap_config);
 }
 
+static int ignore_pll_init;
+
+module_param(ignore_pll_init, int, 0664);
+MODULE_PARM_DESC(ignore_pll_init, "ignore_pll_init");
+
 static int __ref meson_t7_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -8255,6 +8276,7 @@ static int __ref meson_t7_probe(struct platform_device *pdev)
 	struct regmap *pll_map;
 	struct regmap *cpu_clk_map;
 	int ret, i;
+	struct meson_clk_pll_data *mclk_data;
 
 	/* Get regmap for different clock area */
 	basic_map = t7_regmap_resource(dev, "basic");
@@ -8285,6 +8307,10 @@ static int __ref meson_t7_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(t7_pll_clk_regmaps); i++)
 		t7_pll_clk_regmaps[i]->map = pll_map;
 	regmap_write(pll_map, ANACTRL_MPLL_CTRL0, 0x00000543);
+
+	mclk_data = t7_mclk_pll_dco.data;
+	if (ignore_pll_init)
+		mclk_data->ignore_init = true;
 
 	for (i = 0; i < t7_hw_onecell_data.num; i++) {
 		/* array might be sparse */

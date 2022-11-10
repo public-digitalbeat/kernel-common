@@ -42,6 +42,8 @@
 #include <linux/arm-smccc.h>
 #endif
 
+#define FRAC_BASE	100000
+
 static inline struct meson_clk_pll_data *
 meson_clk_pll_data(struct clk_regmap *clk)
 {
@@ -75,12 +77,19 @@ static unsigned long __pll_params_to_rate(unsigned long parent_rate,
 
 	if (frac && MESON_PARM_APPLICABLE(&pll->frac)) {
 		frac_rate = (u64)parent_rate * frac;
-		if (frac & (1 << (pll->frac.width - 1)))
-			rate -= DIV_ROUND_UP_ULL(frac_rate,
+		if (frac & (1 << (pll->frac.width - 1))) {
+			if (pll->new_frac)
+				rate -= DIV_ROUND_UP_ULL(frac_rate, FRAC_BASE);
+			else
+				rate -= DIV_ROUND_UP_ULL(frac_rate,
 						 (1 << (pll->frac.width - 2)));
-		else
-			rate += DIV_ROUND_UP_ULL(frac_rate,
+		} else {
+			if (pll->new_frac)
+				rate += DIV_ROUND_UP_ULL(frac_rate, FRAC_BASE);
+			else
+				rate += DIV_ROUND_UP_ULL(frac_rate,
 						 (1 << (pll->frac.width - 2)));
+		}
 	}
 
 	if (n == 0)
@@ -145,9 +154,13 @@ static unsigned int __pll_params_with_frac(unsigned long rate,
 					   unsigned int n,
 					   struct meson_clk_pll_data *pll)
 {
-	unsigned int frac_max = (1 << (pll->frac.width - 2));
+	unsigned int frac_max;
 	u64 val = (u64)rate * n;
 
+	if (pll->new_frac)
+		frac_max = FRAC_BASE;
+	else
+		frac_max = (1 << (pll->frac.width - 2));
 	/* Bail out if we are already over the requested rate */
 	if (rate < parent_rate * m / n)
 		return 0;
@@ -426,6 +439,12 @@ static void meson_clk_pll_init(struct clk_hw *hw)
 {
 	struct clk_regmap *clk = to_clk_regmap(hw);
 	struct meson_clk_pll_data *pll = meson_clk_pll_data(clk);
+
+	/* Do not init pll, it will gate pll which is needed in RTOS */
+	if (pll->ignore_init) {
+		pr_warn("ignore %s clock init\n", clk_hw_get_name(hw));
+		return;
+	}
 
 	if (pll->init_count) {
 		meson_parm_write(clk->map, &pll->rst, 1);

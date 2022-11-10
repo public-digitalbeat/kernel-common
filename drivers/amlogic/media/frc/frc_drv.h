@@ -63,10 +63,23 @@
 // frc_20220224 frc fix memc state abnormal
 // frc_20220310 fix frc dts_match memory leak
 // frc_20220404 fix frc input not standard
-// frc_20220401 frc reduce cma buffer alloc"
+// frc_20220401 frc reduce cma buffer alloc
+// frc_20220408 frc chg mcdly under 4k1k
 // frc_20220421 frc sync memc_alg_ko_1990
+// frc_20220425 frc inform vlock when disable
+// frc_20220426 frc compute mcdly for vlock
+// frc_20220505 frc check dbg roreg
+// frc_20220524 frc memory optimize
+// frc_20220608 optimize video flag check
+// frc_20220613 fix frc memory resume abnormal
+// frc_20220620 integrated frc status
+// frc_20220623 add frc debug control
+// frc_20220704 fix frc secure mode abnormal
+// frc_20220705 fix frc bypass frame when on
+// frc_20220708 optimize frc off2on flow
+// frc_20220722 add vlock st and time record
 
-#define FRC_FW_VER			"2022-0421 sync memc_alg_ko_1990"
+#define FRC_FW_VER			"2022-0801 set force_mode and ctrl freq"
 #define FRC_KERDRV_VER                  1990
 
 #define FRC_DEVNO	1
@@ -95,9 +108,12 @@ extern int frc_dbg_en;
 #define FRC_COMPRESS_RATE_ME		60
 
 #define FRC_TOTAL_BUF_NUM		16
+#define FRC_TOTAL_BUF_NUM_8     8
 #define FRC_MEMV_BUF_NUM		6
 #define FRC_MEMV2_BUF_NUM		7
 #define FRC_MEVP_BUF_NUM		2
+// release buf num (12 / 16)
+#define FRC_RE_BUF_NUM		12
 
 #define FRC_SLICER_NUM			4
 
@@ -109,8 +125,8 @@ extern int frc_dbg_en;
 
 #define FRC_HVSIZE_ALIGN_SIZE		16
 
-#define FRC_V_LIMIT_SIZE		144
-#define FRC_H_LIMIT_SIZE		128
+#define FRC_V_LIMIT			144
+#define FRC_H_LIMIT			128
 
 /*bit number config*/
 #define FRC_MC_BITS_NUM			10
@@ -131,6 +147,24 @@ extern int frc_dbg_en;
 #define FRC_CLOCK_2OFF               7
 
 //------------------------------------------------------- clock defined end
+// vd fps
+#define FRC_VD_FPS_00    0
+#define FRC_VD_FPS_60    60
+#define FRC_VD_FPS_50    50
+#define FRC_VD_FPS_48    48
+#define FRC_VD_FPS_30    30
+#define FRC_VD_FPS_25    25
+#define FRC_VD_FPS_24    24
+
+// frc flag define
+#define FRC_FLAG_NORM_VIDEO		0x00
+#define FRC_FLAG_GAME_MODE		0x01
+#define FRC_FLAG_PC_MODE		0x02
+#define FRC_FLAG_PIC_MODE		0x04
+#define FRC_FLAG_HIGH_BW		0x08
+#define FRC_FLAG_LIMIT_SIZE		0x10
+#define FRC_FLAG_VLOCK_ST		0x20
+#define FRC_FLAG_OTHER_MODE		0x40
 
 enum chip_id {
 	ID_NULL = 0,
@@ -145,12 +179,23 @@ struct frc_data_s {
 	const struct dts_match_data *match_data;
 };
 
+struct vf_rate_table {
+	u16 duration;
+	u16 framerate;
+};
+
 struct st_frc_buf {
 	/*cma memory define*/
 	u32 cma_mem_size;
+	u32 cma_mem_size2;
 	struct page *cma_mem_paddr_pages;
+	struct page *cma_mem_paddr_pages2;
 	phys_addr_t cma_mem_paddr_start;
+	phys_addr_t cma_mem_paddr_start2;
 	u8  cma_mem_alloced;
+	u8  cma_buf_alloc;
+	u8  cma_buf_alloc2;
+	u8  buf_ctrl;  //0: release buf, 1:alloc buf
 	u8  secured;
 	u8  otherflag;
 	u8  otherflag2;
@@ -274,17 +319,22 @@ struct st_frc_in_sts {
 	u32 have_vf_cnt;
 	u32 no_vf_cnt;
 
-	u32 game_mode;
 	u32 secure_mode;
-	u32 pic_type;
+	u32 st_flag;
 
 	u32  high_freq_en;
 	u32  high_freq_flash; /*0 default, 1: high freq char flash*/
 	u8  inp_size_adj_en;  /*input non-standard size, default 0 is open*/
+
+	/*vd status sync*/
+	u8 frc_is_tvin;
+	u8 frc_source_chg;
+	u16 frc_vf_rate;
+	u32 frc_last_disp_count;
 };
 
 struct st_frc_out_sts {
-	u32 out_framerate;
+	u16 out_framerate;
 	u32 vout_height;
 	u32 vout_width;
 
@@ -375,6 +425,40 @@ struct frc_force_size_s {
 	u32 force_vsize;
 };
 
+union frc_ro_dbg0_stat_u {
+	u32 rawdat;
+	struct {
+		unsigned ref_de_dly_num:16;  /*15:0*/
+		unsigned ref_vs_dly_num:16;  /*31:16*/
+	} bits;
+};
+
+union frc_ro_dbg1_stat_u {
+	u32 rawdat;
+	struct {
+		unsigned mcout_dly_num:16; /*15:0*/
+		unsigned mevp_dly_num:16;  /*31:16*/
+	} bits;
+};
+
+union frc_ro_dbg2_stat_u {
+	u32 rawdat;
+	struct {
+	    unsigned out_de_dly_num:13;     /*12:0*/
+		unsigned out_dly_err: 1;        /*13*/
+		unsigned reserved2: 2;          /*15:14*/
+		unsigned memc_corr_dly_num :13; /*28:16*/
+		unsigned memc_corr_st:2;        /*30:29*/
+		unsigned reserved1:1;
+	} bits;
+};
+
+struct frc_hw_stats_s {
+	union frc_ro_dbg0_stat_u reg4dh;
+	union frc_ro_dbg1_stat_u reg4eh;
+	union frc_ro_dbg2_stat_u reg4fh;
+};
+
 struct frc_dev_s {
 	dev_t devt;
 	struct cdev cdev;
@@ -410,6 +494,7 @@ struct frc_dev_s {
 	struct clk *clk_me;
 	u32 clk_me_frq;
 	unsigned int clk_state;
+	u32 clk_chg;
 	u32 rdma_handle;
 
 	/* vframe check */
@@ -454,6 +539,7 @@ struct frc_dev_s {
 	struct frc_crc_data_s frc_crc_data;
 	struct frc_ud_s ud_dbg;
 	struct frc_force_size_s force_size;
+	struct frc_hw_stats_s hw_stats;
 };
 
 struct frc_dev_s *get_frc_devp(void);

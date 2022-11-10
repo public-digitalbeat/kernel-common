@@ -6,7 +6,6 @@
 /dts-v1/;
 
 #include "meson-a5.dtsi"
-#include "partition_normal_linux.dtsi"
 #include <dt-bindings/input/input.h>
 
 / {
@@ -43,6 +42,11 @@
 		#size-cells = <2>;
 		ranges;
 
+		ramdump_bl33z@00000000 {
+			reg = <0x0 0x0 0x0 0x1800000>; /* 0 ~ 24M */
+			status = "disabled";
+		};
+
 		dsp_fw_reserved:linux,dsp_fw {
 			compatible = "shared-dma-pool";
 			reusable;
@@ -69,27 +73,6 @@
 			alloc-ranges = <0x0 0x05000000 0x0 0x3400000>;
 		};
 
-		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
-			size = <0x0 0x800000>;
-			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3f800000 0x0 0x800000>;
-		};
-
-		ion_cma_reserved:linux,ion-dev {
-			compatible = "shared-dma-pool";
-			reusable;
-			size = <0x0 0x6400000>;
-			alignment = <0x0 0x400000>;
-		};
-		ion_fb_reserved:linux,ion-fb {
-			compatible = "shared-dma-pool";
-			reusable;
-			/* 1920x1080x4x3 round up 4M align */
-			size = <0x0 0x1c00000>;
-			alignment = <0x0 0x400000>;
-		};
 	};
 
 	vddio3v3_reg: fixedregulator@5{
@@ -441,13 +424,44 @@
 		key-gpios = <&gpio  GPIOD_3  GPIO_ACTIVE_HIGH>;
 		detect_mode = <0>;/*0:polling mode, 1:irq mode*/
 	};
-};
 
-&i2c3 {
-	status = "okay";
-	pinctrl-names="default";
-	pinctrl-0=<&i2c3_pins2>;
-	clock-frequency = <300000>;
+	partitions: partitions{
+		parts = <5>;
+		part-0 = <&recovery>;
+		part-1 = <&misc>;
+		part-2 = <&boot>;
+		part-3 = <&system>;
+		part-4 = <&data>;
+
+		recovery:recovery{
+			pname = "recovery";
+			size = <0x0 0x2000000>;
+			mask = <1>;
+		};
+		misc:misc{
+			pname = "misc";
+			size = <0x0 0x800000>;
+			mask = <1>;
+		};
+		boot:boot
+		{
+			pname = "boot";
+			size = <0x0 0x4000000>;
+			mask = <1>;
+		};
+		system:system
+		{
+			pname = "system";
+			size = <0x0 0x40000000>;
+			mask = <1>;
+		};
+		data:data
+		{
+			pname = "data";
+			size = <0xffffffff 0xffffffff>;
+			mask = <4>;
+		};
+	};
 };
 
 &audiobus {
@@ -953,7 +967,7 @@
 };
 
 &audio_data {
-	status = "disabled";
+	status = "okay";
 };
 
 &crg_udc_2 {
@@ -1188,15 +1202,6 @@
 	};
 };
 
-&fb {
-	status = "disabled";
-	display_size_default = <1920 1080 1920 2160 32>;
-	mem_size = <0x00800000 0x1980000 0x100000>;
-	logo_addr = "0x3f800000";
-	mem_alloc = <0>;
-	pxp_mode = <1>; /** 0:normal mode 1:pxp mode */
-};
-
 &aml_wifi{
 	status = "okay";
 	interrupt-gpios = <&gpio  GPIOX_7  GPIO_ACTIVE_HIGH>;
@@ -1238,7 +1243,7 @@
 		#sound-dai-cells = <0>;
 		reg = <0x30>;
 		status = "okay";
-		reset_pin = <&gpio GPIOD_9 0>;
+		reset_pin = <&gpio GPIOD_9 GPIO_ACTIVE_HIGH>;
 	};
 	ad82128_c_31: ad82128_c_31@31 {
 		compatible = "ESMT,ad82128";
@@ -1369,7 +1374,7 @@
 			mapname = "amlogic-remote-2";
 			customcode = <0xfe01>;
 			release_delay = <80>;
-			size  = <45>;
+			size  = <52>;
 			keymap = <
 				REMOTE_KEY(0x10, 200) /* power */
 				REMOTE_KEY(0x1f, 201) /* eject-->input source */
@@ -1416,6 +1421,13 @@
 				REMOTE_KEY(0x44, 242) /* LEGACY */
 				REMOTE_KEY(0xa7, 243) /* CD */
 				REMOTE_KEY(0x09, 244) /* random */
+				REMOTE_KEY(0x00, 245) /* dtsx direct mode */
+				REMOTE_KEY(0x0a, 246) /* dtsx drc  */
+				REMOTE_KEY(0x5b, 247) /* dtsx imax  */
+				REMOTE_KEY(0x13, 248) /* dtsx dialog gain  */
+				REMOTE_KEY(0x41, 249) /* dtsx dialog norm  */
+				REMOTE_KEY(0x43, 250) /* dtsx spkrout */
+				REMOTE_KEY(0x15, 251) /* pcm surround effect */
 				>;
 		};
 		map_2: map_2{

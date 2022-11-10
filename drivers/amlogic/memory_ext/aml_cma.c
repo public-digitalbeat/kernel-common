@@ -124,6 +124,7 @@ EXPORT_SYMBOL(cma_page_count_update);
 #define RESTRIC_ANON	0
 #define ANON_RATIO	60
 bool cma_first_wm_low __read_mostly;
+bool no_filecache_in_cma __read_mostly;
 
 static int __init early_cma_first_wm_low_param(char *buf)
 {
@@ -142,6 +143,23 @@ static int __init early_cma_first_wm_low_param(char *buf)
 
 early_param("cma_first_wm_low", early_cma_first_wm_low_param);
 
+static int __init early_no_filecache_in_cma_param(char *buf)
+{
+	if (!buf)
+		return -EINVAL;
+
+	if (strcmp(buf, "off") == 0)
+		no_filecache_in_cma = false;
+	else if (strcmp(buf, "on") == 0)
+		no_filecache_in_cma = true;
+
+	pr_info("no_filecache_in_cma %sabled\n", no_filecache_in_cma ? "en" : "dis");
+
+	return 0;
+}
+
+early_param("no_filecache_in_cma", early_no_filecache_in_cma_param);
+
 bool can_use_cma(gfp_t gfp_flags)
 {
 #if RESTRIC_ANON
@@ -154,10 +172,10 @@ bool can_use_cma(gfp_t gfp_flags)
 	if (cma_forbidden_mask(gfp_flags))
 		return false;
 
-	if (cma_alloc_ref())
+	if (task_nice(current) > 0)
 		return false;
 
-	if (task_nice(current) > 0)
+	if (no_filecache_in_cma && gfp_flags & __GFP_NO_FC_IN_CMA)
 		return false;
 
 #if RESTRIC_ANON
@@ -202,7 +220,7 @@ static void update_cma_page_trace(struct page *page, unsigned long cnt)
 
 	fun = find_back_trace();
 	if (cma_alloc_trace)
-		pr_info("%s alloc page:%lx, count:%ld, func:%ps\n", __func__,
+		pr_info("c a p:%lx, c:%ld, f:%ps\n",
 			page_to_pfn(page), cnt, (void *)fun);
 	for (i = 0; i < cnt; i++) {
 		set_page_trace(page, 0, __GFP_NO_CMA, (void *)fun);
@@ -239,7 +257,7 @@ void aml_cma_release_hook(int count, struct page *pages)
 {
 #ifdef CONFIG_AMLOGIC_PAGE_TRACE
 	if (cma_alloc_trace)
-		pr_info("%s free page:%lx, count:%d, func:%ps\n", __func__,
+		pr_info("c f p:%lx, c:%d, f:%ps\n",
 			page_to_pfn(pages), count, (void *)find_back_trace());
 #endif /* CONFIG_AMLOGIC_PAGE_TRACE */
 	atomic_long_sub(count, &nr_cma_allocated);
@@ -415,6 +433,8 @@ next:
 	return 0;
 }
 
+DECLARE_BITMAP(online_cpu, sizeof(int));
+
 static int __init init_cma_boost_task(void)
 {
 	int cpu;
@@ -437,7 +457,10 @@ static int __init init_cma_boost_task(void)
 			set_user_nice(task, -17);
 			work->task = task;
 			pr_debug("create cma task%p, for cpu %d\n", task, cpu);
-			wake_up_process(task);
+			if (cpu_online(cpu))
+				wake_up_process(task);
+			else
+				set_bit(cpu, online_cpu);
 		} else {
 			can_boost = 0;
 			pr_err("create task for cpu %d fail:%p\n", cpu, task);
@@ -465,13 +488,15 @@ int cma_alloc_contig_boost(unsigned long start_pfn, unsigned long count)
 	if (allow_cma_tasks)
 		cpus = allow_cma_tasks;
 	else
-		cpus = num_online_cpus();
+		cpus = num_online_cpus() - 1;
 	cnt   = count;
 	delta = count / cpus;
 	atomic_set(&ok, 0);
 	local_irq_save(flags);
 	for_each_online_cpu(cpu) {
 		work = &per_cpu(cma_pcp_thread, cpu);
+		if (test_and_clear_bit(cpu, online_cpu))
+			wake_up_process(work->task);
 		spin_lock(&work->list_lock);
 		INIT_LIST_HEAD(&job[cpu].list);
 		job[cpu].pfn   = start_pfn + i * delta;
@@ -631,15 +656,15 @@ try_again:
 	/*
 	 * try to use more cpu to do this job when alloc count is large
 	 */
+	get_online_cpus();
 	if ((num_online_cpus() > 1) && can_boost &&
 	    ((end - start) >= pageblock_nr_pages / 2)) {
-		get_online_cpus();
 		ret = cma_alloc_contig_boost(start, end - start);
-		put_online_cpus();
 		boost_ok = !ret ? 1 : 0;
 	} else {
 		ret = aml_alloc_contig_migrate_range(&cc, start, end, 0, current);
 	}
+	put_online_cpus();
 
 	if (ret && ret != -EBUSY) {
 		cma_debug(1, NULL, "ret:%d\n", ret);

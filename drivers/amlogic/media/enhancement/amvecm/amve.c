@@ -92,6 +92,9 @@ struct tcon_gamma_table_s video_gamma_table_r_adj;
 struct tcon_gamma_table_s video_gamma_table_g_adj;
 struct tcon_gamma_table_s video_gamma_table_b_adj;
 struct tcon_gamma_table_s video_gamma_table_ioctl_set;
+struct gm_tbl_s gt;
+unsigned int gamma_index;
+unsigned int gm_par_idx;
 
 struct tcon_rgb_ogo_s video_rgb_ogo = {
 	0, /* wb enable */
@@ -108,12 +111,12 @@ struct tcon_rgb_ogo_s video_rgb_ogo = {
 
 #define FLAG_LVDS_FREQ_SW1       BIT(6)
 
-int dnlp_en;/* 0:disabel;1:enable */
+int dnlp_en;/* 0:disable;1:enable */
 module_param(dnlp_en, int, 0664);
 MODULE_PARM_DESC(dnlp_en, "\n enable or disable dnlp\n");
 static int dnlp_status = 1;/* 0:done;1:todo */
 
-int dnlp_en_2;/* 0:disabel;1:enable */
+int dnlp_en_2;/* 0:disable;1:enable */
 module_param(dnlp_en_2, int, 0664);
 MODULE_PARM_DESC(dnlp_en_2, "\n enable or disable dnlp\n");
 
@@ -166,7 +169,6 @@ static unsigned int sr_adapt_level;
 module_param(sr_adapt_level, uint, 0664);
 MODULE_PARM_DESC(sr_adapt_level, "\n sr_adapt_level\n");
 
-unsigned int gamma_index;
 /* *********************************************************************** */
 /* *** VPP_FIQ-oriented functions **************************************** */
 /* *********************************************************************** */
@@ -2642,9 +2644,13 @@ unsigned int skip_pq_ctrl_load(struct am_reg_s *p)
 	unsigned int ret = 0;
 	struct pq_ctrl_s cfg;
 
-	if (dv_pq_bypass == 2) {
+	if (dv_pq_bypass == 3) {
 		memcpy(&cfg, &dv_cfg_bypass, sizeof(struct pq_ctrl_s));
 		cfg.vadj1_en = pq_cfg.vadj1_en;
+	} else if (dv_pq_bypass == 2) {
+		memcpy(&cfg, &dv_cfg_bypass, sizeof(struct pq_ctrl_s));
+		cfg.sharpness0_en = pq_cfg.sharpness0_en;
+		cfg.sharpness1_en = pq_cfg.sharpness1_en;
 	} else if (dv_pq_bypass == 1) {
 		memcpy(&cfg, &dv_cfg_bypass, sizeof(struct pq_ctrl_s));
 	} else {
@@ -2733,13 +2739,22 @@ int dv_pq_ctl(enum dv_pq_ctl_e ctl)
 	struct pq_ctrl_s cfg;
 
 	switch (ctl) {
-	case DV_PQ_BYPASS:
+	case DV_PQ_TV_BYPASS:
 		memcpy(&cfg, &dv_cfg_bypass, sizeof(struct pq_ctrl_s));
 		cfg.vadj1_en = pq_cfg.vadj1_en;
 		vpp_pq_ctrl_config(cfg, WR_DMA);
-		dv_pq_bypass = 2;
-		pr_amve_dbg("dv enable, pq disable, dv_pq_bypass = %d\n",
+		dv_pq_bypass = 3;
+		pr_amve_dbg("dv enable, for TV pq disable, dv_pq_bypass = %d\n",
 			    dv_pq_bypass);
+		break;
+	case DV_PQ_STB_BYPASS:
+		memcpy(&cfg, &dv_cfg_bypass, sizeof(struct pq_ctrl_s));
+		cfg.sharpness0_en = pq_cfg.sharpness0_en;
+		cfg.sharpness1_en = pq_cfg.sharpness1_en;
+		vpp_pq_ctrl_config(cfg, WR_DMA);
+		dv_pq_bypass = 2;
+		pr_amve_dbg("dv enable, for STB pq disable, dv_pq_bypass = %d\n",
+				dv_pq_bypass);
 		break;
 	case DV_PQ_CERT:
 		vpp_pq_ctrl_config(dv_cfg_bypass, WR_DMA);

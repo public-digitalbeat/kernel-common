@@ -20,6 +20,7 @@
 #include <linux/arm-smccc.h>
 
 #include "stmmac_platform.h"
+#include <linux/amlogic/scpi_protocol.h>
 
 #ifdef CONFIG_AMLOGIC_ETH_PRIVE
 #include <linux/input.h>
@@ -339,6 +340,19 @@ static int meson8b_init_prg_eth(struct meson8b_dwmac *dwmac)
 }
 
 #ifdef CONFIG_AMLOGIC_ETH_PRIVE
+void set_wol_notify_bl31(void)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(0x8200009D, support_mac_wol,
+					0, 0, 0, 0, 0, 0, &res);
+}
+
+static void set_wol_notify_bl30(void)
+{
+	scpi_set_ethernet_wol(support_mac_wol);
+}
+
 void __iomem *ee_reset_base;
 unsigned int internal_phy;
 static int aml_custom_setting(struct platform_device *pdev, struct meson8b_dwmac *dwmac)
@@ -423,6 +437,9 @@ extern int stmmac_pltfr_suspend(struct device *dev);
 static int aml_dwmac_suspend(struct device *dev)
 {
 	int ret = 0;
+
+	set_wol_notify_bl31();
+	set_wol_notify_bl30();
 	/*nfx doze do nothing for suspend*/
 	if (support_nfx_doze) {
 		pr_info("doze is running\n");
@@ -441,6 +458,8 @@ static int aml_dwmac_resume(struct device *dev)
 {
 	int ret = 0;
 	struct meson8b_dwmac *dwmac = get_stmmac_bsp_priv(dev);
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct stmmac_priv *priv = netdev_priv(ndev);
 
 	/*nfx doze do nothing for resume*/
 	if (support_nfx_doze) {
@@ -455,13 +474,18 @@ static int aml_dwmac_resume(struct device *dev)
 	ret = stmmac_pltfr_resume(dev);
 	if (support_mac_wol) {
 		if (get_resume_method() == ETH_PHY_WAKEUP) {
-			pr_info("evan---wol rx--KEY_POWER\n");
-			input_event(dwmac->input_dev,
-				EV_KEY, KEY_POWER, 1);
-			input_sync(dwmac->input_dev);
-			input_event(dwmac->input_dev,
-				EV_KEY, KEY_POWER, 0);
-			input_sync(dwmac->input_dev);
+			if (!priv->plat->mdns_wkup) {
+				pr_info("evan---wol rx--KEY_POWER\n");
+				input_event(dwmac->input_dev,
+					EV_KEY, KEY_POWER, 1);
+				input_sync(dwmac->input_dev);
+				input_event(dwmac->input_dev,
+					EV_KEY, KEY_POWER, 0);
+				input_sync(dwmac->input_dev);
+			} else {
+				pr_info("evan---wol rx--pm event\n");
+				pm_wakeup_event(dev, 2000);
+			}
 		}
 	}
 	return 0;
@@ -470,18 +494,12 @@ static int aml_dwmac_resume(struct device *dev)
 void meson8b_dwmac_shutdown(struct platform_device *pdev)
 {
 	pr_info("aml_eth_shutdown\n");
-	stmmac_pltfr_suspend(&pdev->dev);
+	stmmac_pltfr_remove(pdev);
 	if (internal_phy != 2)
 		dwmac_meson_disable_analog(&pdev->dev);
 }
 
-void set_wol_notify_bl31(void)
-{
-	struct arm_smccc_res res;
 
-	arm_smccc_smc(0x8200009D, 0,
-					0, 0, 0, 0, 0, 0, &res);
-}
 
 #endif
 static int meson8b_dwmac_probe(struct platform_device *pdev)
@@ -558,7 +576,9 @@ static int meson8b_dwmac_probe(struct platform_device *pdev)
 #ifdef CONFIG_AMLOGIC_ETH_PRIVE
 	aml_custom_setting(pdev, dwmac);
 	if (support_mac_wol) {
-		set_wol_notify_bl31();
+		if (of_property_read_u32(pdev->dev.of_node, "mdns_wkup", &plat_dat->mdns_wkup) == 0)
+			pr_info("feature mdns_wkup\n");
+
 		device_init_wakeup(&pdev->dev, 1);
 
 	/*input device to send virtual pwr key for android*/

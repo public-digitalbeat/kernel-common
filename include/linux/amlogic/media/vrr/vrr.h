@@ -32,6 +32,7 @@ struct vrr_device_s {
 
 	void *dev_data;
 	unsigned int (*lfc_switch)(void *dev_data, int fps);
+	int (*disable_cb)(void *dev_data);
 };
 
 struct vrr_notifier_data_s {
@@ -73,6 +74,7 @@ struct vrr_notifier_data_s {
 #define VRR_EVENT_UPDATE		BIT(4)
 #define VRR_EVENT_LFC_ON		BIT(5)
 #define VRR_EVENT_LFC_OFF		BIT(6)
+#define VRR_EVENT_GET_STATE		BIT(7)
 
 /* ************************************************************* */
 #ifdef CONFIG_AMLOGIC_MEDIA_VRR

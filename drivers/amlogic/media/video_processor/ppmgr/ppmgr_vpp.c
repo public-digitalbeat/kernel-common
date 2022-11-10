@@ -2215,7 +2215,10 @@ static void process_vf_rotate(struct vframe_s *vf,
 	pp_vf->angle = cur_angle;
 	new_vf->duration = vf->duration;
 #endif
-
+	new_vf->ready_jiffies64 = vf->ready_jiffies64;
+	new_vf->ready_clock[0] = vf->ready_clock[0];
+	new_vf->ready_clock[1] = vf->ready_clock[1];
+	new_vf->ready_clock[2] = vf->ready_clock[2];
 	new_vf->duration_pulldown = vf->duration_pulldown;
 	new_vf->mem_sec = vf->mem_sec;
 	new_vf->pts = vf->pts;
@@ -2830,6 +2833,7 @@ static int ppmgr_task(void *data)
 	u8 reset_tb = 0;
 	u32 init_mute = 0;
 #endif
+	unsigned int newvideoangle = 0;
 	memset(&ge2d_config, 0, sizeof(struct config_para_ex_s));
 	sched_setscheduler(current, SCHED_FIFO, &param);
 	allow_signal(SIGTERM);
@@ -2899,6 +2903,10 @@ static int ppmgr_task(void *data)
 					 ppmgr_device.orientation) % 4;
 				set_property_change(1);
 				ppmgr_device.started = 0;
+			} else {
+				newvideoangle = (ppmgr_device.angle + ppmgr_device.orientation) % 4;
+				if (newvideoangle == ppmgr_device.videoangle)
+					set_property_change(0);
 			}
 			vf->video_angle = (ppmgr_device.angle
 					   + ppmgr_device.orientation

@@ -133,6 +133,8 @@ struct rx_cap {
 	u32 fva:1;
 	u32 allm:1;
 	u32 fapa_start_loc:1;
+	u32 fapa_end_extended:1;
+	u32 cinemavrr:1;
 	u32 vrr_max;
 	u32 vrr_min;
 	struct hdr_info hdr_info;
@@ -270,6 +272,19 @@ enum hdmi_hdr_color {
 	C_BT2020,
 };
 
+enum hdmitx_aspect_ratio {
+	AR_UNKNOWM = 0,
+	AR_4X3,
+	AR_16X9,
+};
+
+struct aspect_ratio_list {
+	enum hdmi_vic vic;
+	int flag;
+	char aspect_ratio_num;
+	char aspect_ratio_den;
+};
+
 struct hdmitx_clk_tree_s {
 	/* hdmitx clk tree */
 	struct clk *hdmi_clk_vapb;
@@ -309,6 +324,7 @@ struct hdmitx_dev {
 	struct delayed_work work_internal_intr;
 	struct delayed_work work_cedst;
 	struct work_struct work_hdr;
+	struct delayed_work work_start_hdcp;
 	struct vrr_device_s hdmitx_vrr_dev;
 	void *am_hdcp;
 #ifdef CONFIG_AML_HDMI_TX_14
@@ -351,8 +367,6 @@ struct hdmitx_dev {
 	enum hdmi_event_t hdmitx_event;
 	u32 irq_hpd;
 	u32 irq_vrr_vsync;
-	u32 old_max_lcnt;
-	u32 new_max_lcnt;
 	/*EDID*/
 	u32 cur_edid_block;
 	u32 cur_phy_block_ptr;
@@ -382,6 +396,7 @@ struct hdmitx_dev {
 	u8 rhpd_state; /* For repeater use only, no delay */
 	u8 force_audio_flag;
 	u8 mux_hpd_if_pin_high_flag;
+	int aspect_ratio;	/* 1, 4:3; 2, 16:9 */
 	struct hdmitx_info hdmi_info;
 	u32 log;
 	u32 tx_aud_cfg; /* 0, off; 1, on */
@@ -399,6 +414,7 @@ struct hdmitx_dev {
 	u32 rxsense_policy;
 	u32 cedst_policy;
 	u32 enc_idx;
+	u32 vrr_type; /* 1: GAME-VRR, 2: QMS-VRR */
 	struct ced_cnt ced_cnt;
 	struct scdc_locked_st chlocked_st;
 	u32 allm_mode; /* allm_mode: 1/on 0/off */
@@ -440,12 +456,17 @@ struct hdmitx_dev {
 	spinlock_t edid_spinlock; /* edid hdr/dv cap lock */
 	struct vpu_dev_s *hdmitx_vpu_clk_gate_dev;
 
+	unsigned int hdcp_ctl_lvl;
+
 	/*DRM related*/
 	int drm_hdmitx_id;
 	struct connector_hpd_cb drm_hpd_cb;
 	struct connector_hdcp_cb drm_hdcp_cb;
 
 	struct miscdevice hdcp_comm_device;
+	u8 def_stream_type;
+	u8 tv_usage;
+	bool systemcontrol_on;
 };
 
 #define CMD_DDC_OFFSET          (0x10 << 24)
@@ -500,6 +521,7 @@ struct hdmitx_dev {
 #define AUDIO_MUTE          0x1
 #define AUDIO_UNMUTE        0x2
 #define CONF_CLR_AUDINFO_PACKET (CMD_CONF_OFFSET + 0x1000 + 0x01)
+#define CONF_ASPECT_RATIO	(CMD_CONF_OFFSET + 0x60c)
 
 /***********************************************************************
  *             MISC control, hpd, hpll //cntlmisc
@@ -567,6 +589,7 @@ const char *hdmitx21_edid_vic_to_string(enum hdmi_vic vic);
 void hdmitx21_edid_clear(struct hdmitx_dev *hdev);
 void hdmitx21_edid_ram_buffer_clear(struct hdmitx_dev *hdev);
 void hdmitx21_edid_buf_compare_print(struct hdmitx_dev *hdev);
+int hdmitx21_read_phy_status(void);
 
 /* VSIF: Vendor Specific InfoFrame
  * It has multiple purposes:
@@ -611,9 +634,9 @@ void hdmitx21_set_avi_vic(enum hdmi_vic vic);
  * RX downstream Information from rptx to rprx
  */
 /* send part raw edid from TX to RX */
-void rx_repeat_hpd_state(u32 st);
+void rx_repeat_hpd_state(bool st);
 /* prevent compile error in no HDMIRX case */
-void __attribute__((weak))rx_repeat_hpd_state(u32 st)
+void __attribute__((weak))rx_repeat_hpd_state(bool st)
 {
 }
 
@@ -664,6 +687,7 @@ int hdmitx21_set_audio(struct hdmitx_dev *hdev,
 #define HDMITX_PLUG			1
 #define HDMITX_UNPLUG			2
 #define HDMITX_PHY_ADDR_VALID		3
+#define HDMITX_KSVLIST	4
 
 #define HDMI_SUSPEND    0
 #define HDMI_WAKEUP     1
@@ -765,4 +789,5 @@ bool hdmitx21_hdr_en(void);
 bool hdmitx21_dv_en(void);
 bool hdmitx21_hdr10p_en(void);
 u32 aud_sr_idx_to_val(enum hdmi_audio_fs e_sr_idx);
+bool hdmitx21_uboot_already_display(void);
 #endif

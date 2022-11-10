@@ -611,7 +611,7 @@ static int apply_vma_lock_flags(unsigned long start, size_t len,
 		tmp = vma->vm_end;
 		if (tmp > end)
 			tmp = end;
-	#ifdef CONFIG_AMLOGIC_MEMORY_EXTEND
+	#ifdef CONFIG_AMLOGIC_PIN_LOCKED_FILE
 		if (vma->vm_file && vma->vm_file->f_mapping) {
 			struct inode *host;
 
@@ -620,7 +620,8 @@ static int apply_vma_lock_flags(unsigned long start, size_t len,
 				set_bit(AS_LOCK_MAPPING,
 					&vma->vm_file->f_mapping->flags);
 				atomic_inc(&host->i_count);
-			} else {
+			} else if (test_bit(AS_LOCK_MAPPING,
+				   &vma->vm_file->f_mapping->flags)){
 				atomic_dec(&host->i_count);
 				clear_bit(AS_LOCK_MAPPING,
 					  &vma->vm_file->f_mapping->flags);

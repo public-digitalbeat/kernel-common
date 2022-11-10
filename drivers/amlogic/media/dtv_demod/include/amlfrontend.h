@@ -37,6 +37,19 @@
 /*  V1.1.44  t3 revb change list check abus audio problem */
 /*  V1.1.45  optimize dvb-c auto symbol rate(all) and auto qam(t5w) */
 /*  V1.1.46  use the codec_mm cma for DTMB(8M)/DVB-T2(40M)/ISDB-T(8M) */
+/*  V1.1.47  support IRC and HRC in j83b auto qam mode */
+/*  V1.1.48  fixed 16qam/32qam cost long time to lock up or error */
+/*  V1.1.49  fix HRC freq of 79M lock failed */
+/*  V1.1.50  fixed data type of memory address and read/write */
+/*  V1.1.51  fixed dvbs/s2/isdbt aft test and support dvbt2 5/6/1.7M */
+/*  V1.1.52  add ambus exit processing when switching mode */
+/*  V1.1.53  fixed dvb-c auto qam unlock when 16qam/32qam */
+/*  V1.1.54  rebuild atsc to improve signal locking performance */
+/*  V1.1.55  improve atsc cci */
+/*  V1.1.56  add dvbt2 fef info */
+/*  V1.1.57  fix auto qam(t5w) and sr */
+/*  V1.1.58  fix delsys exit setting and r842 dvbc auto sr */
+/*  V1.1.59  fix dvbs/s2 aft range and different tuner blind window settings */
 /****************************************************/
 /****************************************************************/
 /*               AMLDTVDEMOD_VER  Description:                  */
@@ -53,9 +66,9 @@
 /*->The last four digits indicate the release time              */
 /****************************************************************/
 #define KERNEL_4_9_EN		1
-#define AMLDTVDEMOD_VER "V1.1.46"
-#define DTVDEMOD_VER	"2022/04/18: use the codec_mm cma for DTMB(8M)/DVB-T2(40M)/ISDB-T(8M)"
-#define AMLDTVDEMOD_T2_FW_VER "V1417.0909"
+#define AMLDTVDEMOD_VER "V1.1.59"
+#define DTVDEMOD_VER	"2022/08/23: fix dvbs/s2 aft range and different tuner blind window settings"
+#define AMLDTVDEMOD_T2_FW_VER "V1551.20220524"
 #define DEMOD_DEVICE_NAME  "dtvdemod"
 
 #define THRD_TUNER_STRENTH_ATSC (-87)
@@ -63,9 +76,10 @@
 /* tested on BTC, sensertivity of demod is -100dBm */
 #define THRD_TUNER_STRENTH_DVBT (-101)
 #define THRD_TUNER_STRENTH_DVBS (-79)
-#define THRD_TUNER_STRENTH_DTMB (-92)
+#define THRD_TUNER_STRENTH_DTMB (-100)
+#define THRD_TUNER_STRENTH_DVBC (-87)
 
-#define TIMEOUT_ATSC		2000
+#define TIMEOUT_ATSC		3000
 #define TIMEOUT_DVBT		3000
 #define TIMEOUT_DVBS		2000
 #define TIMEOUT_DVBC		3000
@@ -201,6 +215,7 @@ struct aml_demod_para_real {
 	u32_t symbol;
 	u32_t snr;
 	u32_t plp_num;
+	u32_t fef_info;
 };
 
 #define CAP_NAME_LEN	100
@@ -243,6 +258,7 @@ struct aml_dtvdemod {
 	unsigned int sr_val_hw;
 	unsigned int sr_val_hw_stable;
 	unsigned int sr_val_hw_count;
+	unsigned int sr_val_uf_count;
 	unsigned int symb_rate_en;
 	unsigned int auto_sr;
 	unsigned int auto_sr_done;
@@ -267,6 +283,7 @@ struct aml_dtvdemod {
 	enum qam_md_e auto_qam_mode;
 	enum qam_md_e last_qam_mode;
 	unsigned int auto_times;
+	unsigned int auto_done_times;
 	unsigned int auto_qam_done;
 	unsigned int auto_no_sig_cnt;
 	unsigned int fast_search_finish;
@@ -336,10 +353,10 @@ struct amldtvdemod_device_s {
 
 #if 1 /*move to aml_dtv_demod*/
 	/*for mem reserved*/
-	int			mem_start;
-	int			mem_end;
-	int			mem_size;
-	int			cma_flag;
+	unsigned int		mem_start;
+	unsigned int		mem_end;
+	unsigned int		mem_size;
+	unsigned int		cma_flag;
 	bool		flg_cma_allc;
 
 #ifdef CONFIG_CMA
@@ -392,7 +409,7 @@ struct amldtvdemod_device_s {
 
 	bool vdac_enable;
 	bool dvbc_inited;
-	int peak[2048];
+	unsigned int peak[2048];
 	unsigned int ber_base;
 	unsigned int atsc_cr_step_size_dbg;
 	unsigned char index;
@@ -553,6 +570,7 @@ unsigned int dtvdemod_get_atsc_lock_sts(struct aml_dtvdemod *demod);
 const char *dtvdemod_get_cur_delsys(enum fe_delivery_system delsys);
 void aml_dtv_demode_isr_en(struct amldtvdemod_device_s *devp, u32 en);
 u32 dvbc_get_symb_rate(struct aml_dtvdemod *demod);
+u32 dvbc_get_per(struct aml_dtvdemod *demod);
 unsigned int demod_is_t5d_cpu(struct amldtvdemod_device_s *devp);
 int dtmb_information(struct seq_file *seq);
 

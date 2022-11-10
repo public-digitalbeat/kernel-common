@@ -80,85 +80,98 @@ static size_t s4_dmc_dump_reg(char *buf)
 
 static void check_violation(struct dmc_monitor *mon, void *data)
 {
-	int i, port, subport;
-	unsigned long addr, status, value;
+	int port, subport;
+	unsigned long addr = 0, status = 0, value, irqreg;
 	char id_str[MAX_NAME];
 	char title[10] = "";
 	struct page *page;
 	struct page_trace *trace;
 
-	for (i = 1; i < 4; i += 2) {
-		status = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_0 + (i << 2), 0, DMC_READ);
-
-		switch (dmc_mon->chip) {
-		case DMC_TYPE_T5W:
-			value = (DMC_VIO_PROT_RANGE0_T5W |
-						DMC_VIO_PROT_RANGE1_T5W);
-			break;
-		case DMC_TYPE_A5:
-			value = (DMC_VIO_PROT_RANGE0_A5 | DMC_VIO_PROT_RANGE1_A5);
-			break;
-
-		default:
-			value = (DMC_VIO_PROT_RANGE0 | DMC_VIO_PROT_RANGE1);
-			break;
-		}
-
-		if (!(status & value))
-			continue;
-
-		addr = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_0 + ((i - 1) << 2), 0,
-				   DMC_READ);
-		if (addr > mon->addr_end)
-			continue;
-
-		/* ignore violation on same page/same port */
-		if ((addr & PAGE_MASK) == mon->last_addr &&
-		    status == mon->last_status) {
-			mon->same_page++;
-			if (mon->debug & DMC_DEBUG_CMA)
-				sprintf(title, "%s", "_SAME");
-			else
-				continue;
-		}
-		/* ignore cma driver pages */
-		page = phys_to_page(addr);
-		trace = find_page_base(page);
-		if (trace && trace->migrate_type == MIGRATE_CMA) {
-			if (mon->debug & DMC_DEBUG_CMA)
-				sprintf(title, "%s", "_CMA");
-			else
-				continue;
-		}
-
-		switch (dmc_mon->chip) {
-		case DMC_TYPE_T5W:
-			port = (status >> 9) & 0x1f;
-			subport = (status >> 4) & 0xf;
-			break;
-		case DMC_TYPE_A5:
-			port = (status >> 9) & 0x07;
-			subport = (status >> 4) & 0xf;
-			break;
-
-		default:
-			port = (status >> 11) & 0x1f;
-			subport = (status >> 6) & 0xf;
-			break;
-		}
-
-		pr_emerg(DMC_TAG "%s, addr:%08lx, s:%08lx, ID:%s, sub:%s, c:%ld, d:%p\n",
-			 title, addr, status, to_ports(port),
-			 to_sub_ports(port, subport, id_str),
-			 mon->same_page, data);
-		show_violation_mem(addr);
-		if (!port) /* dump stack for CPU write */
-			dump_stack();
-
-		mon->same_page   = 0;
-		mon->last_addr   = addr & PAGE_MASK;
-		mon->last_status = status;
+	irqreg = dmc_prot_rw(dmc_mon->io_mem1, DMC_IRQ_STS, 0, DMC_READ);
+	if (irqreg & DMC_WRITE_VIOLATION) {
+		status = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_1, 0, DMC_READ);
+		addr = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_0, 0, DMC_READ);
 	}
+	if (irqreg & DMC_READ_VIOLATION) {
+		status = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_3, 0, DMC_READ);
+		addr = dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT_VIO_2, 0, DMC_READ);
+	}
+
+	switch (dmc_mon->chip) {
+	case DMC_TYPE_T5W:
+		value = (DMC_VIO_PROT_RANGE0_T5W |
+					DMC_VIO_PROT_RANGE1_T5W);
+		break;
+	case DMC_TYPE_A5:
+		value = (DMC_VIO_PROT_RANGE0_A5 | DMC_VIO_PROT_RANGE1_A5);
+		break;
+
+	default:
+		value = (DMC_VIO_PROT_RANGE0 | DMC_VIO_PROT_RANGE1);
+		break;
+	}
+
+	if (!(status & value))
+		return;
+
+	if (addr > mon->addr_end)
+		return;
+
+	/* ignore violation on same page/same port */
+	if ((addr & PAGE_MASK) == mon->last_addr &&
+		status == mon->last_status) {
+		mon->same_page++;
+		if (mon->debug & DMC_DEBUG_CMA)
+			sprintf(title, "%s", "_SAME");
+		else
+			return;
+	}
+	/* ignore cma driver pages */
+	page = phys_to_page(addr);
+	trace = find_page_base(page);
+	if (trace && trace->migrate_type == MIGRATE_CMA) {
+		if (mon->debug & DMC_DEBUG_CMA)
+			sprintf(title, "%s", "_CMA");
+		else
+			return;
+	}
+
+	switch (dmc_mon->chip) {
+	case DMC_TYPE_T5W:
+		port = (status >> 9) & 0x1f;
+		subport = (status >> 4) & 0xf;
+		break;
+	case DMC_TYPE_A5:
+		port = (status >> 9) & 0x07;
+		subport = (status >> 4) & 0xf;
+		break;
+
+	default:
+		port = (status >> 11) & 0x1f;
+		subport = (status >> 6) & 0xf;
+		break;
+	}
+
+	if ((mon->debug & DMC_DEBUG_CMA) == 0) {
+		if (strstr(to_sub_ports(port, subport, id_str), "EMMC"))
+			return;
+		if (strstr(to_sub_ports(port, subport, id_str), "USB"))
+			return;
+		if (strstr(to_sub_ports(port, subport, id_str), "ETH"))
+			return;
+	}
+
+	pr_emerg(DMC_TAG "%s, addr:%08lx, s:%08lx, ID:%s, sub:%s, c:%ld, d:%p\n",
+			title, addr, status, to_ports(port),
+			to_sub_ports(port, subport, id_str),
+			mon->same_page, data);
+	show_violation_mem(addr);
+	if (!port) /* dump stack for CPU write */
+		dump_stack();
+
+	mon->same_page   = 0;
+	mon->last_addr   = addr & PAGE_MASK;
+	mon->last_status = status;
 }
 
 static void s4_dmc_mon_irq(struct dmc_monitor *mon, void *data)
@@ -182,15 +195,17 @@ static void s4_dmc_mon_irq(struct dmc_monitor *mon, void *data)
 static int s4_dmc_mon_set(struct dmc_monitor *mon)
 {
 	unsigned long value, end;
+	unsigned int wb;
 
 	/* aligned to 64KB */
+	wb = mon->addr_start & 0x01;
 	end = ALIGN(mon->addr_end, DMC_ADDR_SIZE);
 	value = (mon->addr_start >> 16) | ((end >> 16) << 16);
 	dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT0_RANGE, value, DMC_WRITE);
 
 	dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT0_CTRL, mon->device | 1 << 24, DMC_WRITE);
 
-	value = (1 << 24 | 0xffff);
+	value = (wb << 25) | (1 << 24) | 0xffff;
 
 	dmc_prot_rw(dmc_mon->io_mem1, DMC_PROT0_CTRL1, value, DMC_WRITE);
 

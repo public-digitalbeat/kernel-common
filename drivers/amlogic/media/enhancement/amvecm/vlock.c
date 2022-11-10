@@ -39,6 +39,7 @@
 #include "amcm.h"
 #include "reg_helper.h"
 #include <linux/amlogic/gki_module.h>
+#include "frame_lock_policy.h"
 
 /* video lock */
 /* 0:off;
@@ -72,7 +73,7 @@ static unsigned int vlock_intput_type;
  */
 static signed int vlock_line_limit = 2;
 
-static signed int vlock_enc_maxtune_line_num = 8;
+static signed int vlock_enc_maxtune_line_num = 12;
 module_param(vlock_enc_maxtune_line_num, uint, 0664);
 MODULE_PARM_DESC(vlock_enc_maxtune_line_num, "\n vlock_enc_maxtune_line_num\n");
 
@@ -191,7 +192,8 @@ u32 loop1_en = 1;	/*0:off, 1:on 2:auto*/
 u32 speed_up_en = 1;
 
 static int vlock_protect_min;
-static int vlock_manual = 15;
+static int vlock_manual;
+static int vlock_frc_is_on;
 
 struct reg_map vlock_reg_maps[REG_MAP_END] = {0};
 
@@ -472,12 +474,39 @@ void vlock_set_panel_ss(u32 onoff)
 #endif
 }
 
+enum vlock_enc_num_e get_cur_enc_mode(void)
+{
+	const struct vinfo_s *vinfo;
+	unsigned int viu_mux;
+	enum vlock_enc_num_e enc_mux;
+
+	vinfo = get_current_vinfo();
+	viu_mux = (vinfo->viu_mux >> 4) & 0xf;
+
+	switch (viu_mux) {
+	case 0:
+		enc_mux = VLOCK_ENC0;
+		break;
+	case 1:
+		enc_mux = VLOCK_ENC1;
+		break;
+	case 2:
+		enc_mux = VLOCK_ENC2;
+		break;
+	default:
+		enc_mux = VLOCK_ENC0;
+		break;
+	}
+
+	return enc_mux;
+}
+
 int __attribute__((weak))frc_is_on(void)
 {
 	return 0;
 }
 
-static void vlock_tune_sync_frc(u32 frc_vporch_cal)
+static void vlock_tune_sync_frc(u32 frc_vporch_cal, unsigned char frc_s2l_en)
 {
 	u32 max_lncnt;
 	u32 max_pxcnt;
@@ -490,11 +519,15 @@ static void vlock_tune_sync_frc(u32 frc_vporch_cal)
 			frc_vporch_cal : (max_lncnt - 1950);
 
 	if ((vlock_debug & VLOCK_DEBUG_FLASH))
-		pr_info("vlock: %s max_lncnt =%d max_pxcnt =%d frc_v_porch =%d\n",
+		pr_info("vlock: %s max_lncnt =%d max_pxcnt =%d frc_v_porch =%d frc_s2l_en=%d\n",
 		__func__,
-		max_lncnt, max_pxcnt, frc_v_porch);
+		max_lncnt, max_pxcnt, frc_v_porch, frc_s2l_en);
 
-	WRITE_VPP_REG(ENCL_SYNC_TO_LINE_EN, (1 << 13) | (max_lncnt - frc_v_porch));
+	if (frc_s2l_en)
+		WRITE_VPP_REG(ENCL_SYNC_TO_LINE_EN, (1 << 13) | (max_lncnt - frc_v_porch));
+	else
+		WRITE_VPP_REG_BITS(ENCL_SYNC_TO_LINE_EN, 0, 13, 1);
+
 	WRITE_VPP_REG(ENCL_SYNC_PIXEL_EN, (1 << 15) | (max_pxcnt - 1));
 	WRITE_VPP_REG(ENCL_SYNC_LINE_LENGTH, max_lncnt - frc_v_porch - 1);
 }
@@ -503,11 +536,14 @@ bool vlock_vsync_skip_for_frc(void)
 {
 	int ret = false;
 	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
 
 #ifdef VLOCK_DEBUG_ENC_IDX
 	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
 #else
-	pvlock = vlock_tab[VLOCK_ENC0];
+	pvlock = vlock_tab[enc_mux];
 #endif
 
 	if (!pvlock->dtdata->vlk_ctl_for_frc)
@@ -523,15 +559,24 @@ int vlock_sync_frc_vporch(struct stvlock_frc_param frc_param)
 {
 	int ret = -1;
 	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
 
 #ifdef VLOCK_DEBUG_ENC_IDX
 	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
 #else
-	pvlock = vlock_tab[VLOCK_ENC0];
+	pvlock = vlock_tab[enc_mux];
 #endif
 
 	if (!pvlock)
 		return ret;
+
+	vlock_manual = frc_param.frc_mcfixlines;
+	vlock_frc_is_on = frc_param.s2l_en;
+
+	if (vlock_frc_is_on == VLOCK_V_FRONT_PORCH_REV_B)
+		return 0;
 
 	if (pvlock->dtdata->vlk_ctl_for_frc) {
 		if (pvlock->fsm_sts == VLOCK_STATE_ENABLE_STEP1_DONE ||
@@ -539,16 +584,16 @@ int vlock_sync_frc_vporch(struct stvlock_frc_param frc_param)
 			pvlock->enc_frc_v_porch = frc_param.frc_v_porch;
 			pvlock->enc_frc_max_line = frc_param.max_lncnt;
 			pvlock->enc_frc_max_pixel = frc_param.max_pxcnt;
-			pr_info("vlock: vlock not done, is locking ..., frc set max lncnt and ma px cnt!");
+			pr_info("vlock: vlock not done, is locking ...");
 			ret = 0;
 		} else {
-			pr_info("vlock: vlock is NULL or Disable, frc set max lncnt and ma px cnt!");
-			vlock_tune_sync_frc(frc_param.frc_v_porch);
+			pr_info("vlock: vlock status is starting ...");
+			vlock_tune_sync_frc(frc_param.frc_v_porch, frc_param.s2l_en);
 			ret = 0;
 		}
 	} else {
 		pr_info("vlock: vlk_ctl_for_frc = 0 no need vlock avoid flash patch!!!");
-		vlock_tune_sync_frc(frc_param.frc_v_porch);
+		vlock_tune_sync_frc(frc_param.frc_v_porch, frc_param.s2l_en);
 		ret = 0;
 	}
 
@@ -570,10 +615,10 @@ static void vlock_tune_sync(struct stvlock_sig_sts *pvlock)
 			u32 max_pxcnt = pvlock->enc_frc_max_pixel;
 
 			if ((vlock_debug & VLOCK_DEBUG_FLASH))
-				pr_info("vlock: frc_v_porch =%d max_lncnt =%d max_pxcnt =%d\n",
-					frc_v_porch, max_lncnt, max_pxcnt);
+				pr_info("vlock: frc_v_porch =%d max_lncnt =%d max_pxcnt =%d vlock_frc_is_on:%d\n",
+					frc_v_porch, max_lncnt, max_pxcnt, vlock_frc_is_on);
 
-			if (!frc_is_on())
+			if (!frc_is_on() || vlock_frc_is_on == VLOCK_V_FRONT_PORCH_REV_B)
 				return;
 
 			/*shdow register*/
@@ -1234,6 +1279,18 @@ void vlock_vmode_check(struct stvlock_sig_sts *pvlock)
 	}
 }
 
+static void vlock_lock_status_check(struct stvlock_sig_sts *pvlock)
+{
+	if (vlock_get_phlock_flag() && vlock_get_vlock_flag()) {
+		if (vlock_debug & VLOCK_DEBUG_PROTECT)
+			pr_info("vlock locked success !!!\n");
+	} else {
+		if (vlock_debug & VLOCK_DEBUG_PROTECT)
+			pr_info("vlock locking fsm_sts=%d\n",
+					pvlock->fsm_sts);
+	}
+}
+
 static void vlock_disable_step1(struct stvlock_sig_sts *pvlock)
 {
 	unsigned int m_reg_value, tmp_value;
@@ -1561,7 +1618,7 @@ static void vlock_enable_step3_enc(struct stvlock_sig_sts *pvlock)
 		if (enc_max_line >= vlock_protect_min)
 			WRITE_VPP_REG(pvlock->enc_max_line_addr + offset_enc, enc_max_line);
 		else if ((vlock_debug & VLOCK_DEBUG_FLASH))
-			pr_info("vlock:warning..enc_max_line:%d is limited by prt_min:%d cannot adj contiue\n",
+			pr_info("vlock:WARNING... enc_max_line:%d is limited by prt_min:%d cannot adj contiue\n",
 				enc_max_line, vlock_protect_min);
 		if ((vlock_debug & VLOCK_DEBUG_FLASH)) {
 			pr_info("polity_line_num=%d line_num=%d, org_line=%d\n",
@@ -1976,11 +2033,14 @@ void vlock_clear_frame_counter(struct stvlock_sig_sts *pvlock)
 void vlock_set_sts_by_frame_lock(bool en)
 {
 	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
 
 #ifdef VLOCK_DEBUG_ENC_IDX
 	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
 #else
-	pvlock = vlock_tab[VLOCK_ENC0];
+	pvlock = vlock_tab[enc_mux];
 #endif
 
 	if (!en) {
@@ -2017,8 +2077,8 @@ void vlock_enable_step3_auto_enc(struct stvlock_sig_sts *pvlock)
 	stbdec_win0 = READ_VPP_REG(VPU_VLOCK_STBDET_WIN0_WIN1 + offset_vlck) & 0xff;
 	stbdec_win1 = (READ_VPP_REG(VPU_VLOCK_STBDET_WIN0_WIN1 + offset_vlck) >> 8) & 0xff;
 
-	th0 = (oa * stbdec_win0 * 7) / vinfo->vtotal;
-	th1 = (oa * stbdec_win1 * 8) / vinfo->vtotal;
+	th0 = (oa * stbdec_win0 * 10) / vinfo->vtotal;
+	th1 = (oa * stbdec_win1 * 10) / vinfo->vtotal;
 
 	WRITE_VPP_REG(VPU_VLOCK_WIN0_TH + offset_vlck, th0);
 	WRITE_VPP_REG(VPU_VLOCK_WIN1_TH + offset_vlck, th1);
@@ -2334,21 +2394,48 @@ bool vlock_get_vlock_flag_ex(struct stvlock_sig_sts *pvlock)
 
 bool vlock_get_phlock_flag(void)
 {
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
+
+#ifdef VLOCK_DEBUG_ENC_IDX
+	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
+#else
+	pvlock = vlock_tab[enc_mux];
+#endif
 
 	return vlock_get_phlock_flag_ex(pvlock);
 }
 
 bool vlock_get_vlock_flag(void)
 {
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
+
+#ifdef VLOCK_DEBUG_ENC_IDX
+		pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
+#else
+	pvlock = vlock_tab[enc_mux];
+#endif
 
 	return vlock_get_vlock_flag_ex(pvlock);
 }
 
 u32 vlock_get_vlock_sts(void)
 {
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
+
+#ifdef VLOCK_DEBUG_ENC_IDX
+	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
+#else
+	pvlock = vlock_tab[enc_mux];
+#endif
 
 	if (!pvlock) {
 		if (vlock_debug & VLOCK_DEBUG_INFO)
@@ -2491,6 +2578,7 @@ u32 vlock_fsm_input_check(struct stvlock_sig_sts *pvlock, struct vframe_s *vf)
 		vframe_sts = true;
 
 	vlock_vmode_check(pvlock);
+	vlock_lock_status_check(pvlock);
 
 	if (vf) {
 		vinfo = get_current_vinfo();
@@ -2503,7 +2591,7 @@ u32 vlock_fsm_input_check(struct stvlock_sig_sts *pvlock, struct vframe_s *vf)
 		//	pr_info("input_hz:%d duration:%d\n", pvlock->input_hz, pvlock->duration);
 		vlock_protect_min =
 			vinfo->vbp + vinfo->vsw + vinfo->height + vlock_manual;
-		if (vlock_debug & 0x200)
+		if (vlock_debug & VLOCK_DEBUG_PROTECT)
 			pr_info("prt_min:%d org_enc_line_num:%d vbp:%d vsw:%d height:%d vlock_manual:%d\n",
 				vlock_protect_min, pvlock->org_enc_line_num,
 				vinfo->vbp, vinfo->vsw, vinfo->height, vlock_manual);
@@ -2557,8 +2645,10 @@ u32 vlock_fsm_to_en_func(struct stvlock_sig_sts *pvlock,
 		pvlock->pre_enc_max_pixel = pvlock->org_enc_pixel_num;
 
 		if (vlock_debug & VLOCK_DEBUG_FLASH)
-			pr_info("%s pre_enc_max_line:%d org_enc_line_num:%d pre_enc_max_pixel:%d\n",
+			pr_info("%s idx = %d, addr = 0x%x, pre_enc_max_line:%d org_enc_line_num:%d pre_enc_max_pixel:%d\n",
 			__func__,
+			pvlock->idx,
+			pvlock->enc_max_line_addr + offset_enc,
 			pvlock->pre_enc_max_line,
 			pvlock->org_enc_line_num,
 			pvlock->pre_enc_max_pixel);
@@ -2873,6 +2963,8 @@ void vlock_fsm_monitor(struct vframe_s *vf, struct stvlock_sig_sts *pvlock)
 	vlock_vmd_input_check(pvlock);
 	switch (pvlock->fsm_sts) {
 	case VLOCK_STATE_NULL:
+		if (vlock_frc_is_on)
+			vlock_tune_sync(pvlock);
 		if (pvlock->vf_sts) {
 			/*have frame in*/
 			pvlock->frame_cnt_no = 0;
@@ -2901,6 +2993,8 @@ void vlock_fsm_monitor(struct vframe_s *vf, struct stvlock_sig_sts *pvlock)
 		break;
 
 	case VLOCK_STATE_ENABLE_STEP1_DONE:
+		if (vlock_frc_is_on)
+			vlock_tune_sync(pvlock);
 		if (pvlock->vf_sts) {
 			pvlock->frame_cnt_in++;
 			pvlock->frame_cnt_no = 0;
@@ -3040,11 +3134,13 @@ void vlock_process(struct vframe_s *vf,
 		   struct vpp_frame_par_s *cur_video_sts)
 {
 	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
 
+	enc_mux = get_cur_enc_mode();
 #ifdef VLOCK_DEBUG_ENC_IDX
 	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
 #else
-	pvlock = vlock_tab[VLOCK_ENC0];
+	pvlock = vlock_tab[enc_mux];
 #endif
 
 	if (!pvlock)
@@ -3078,6 +3174,14 @@ void vlock_process(struct vframe_s *vf,
 			return;
 		}
 	}
+
+	if (vlock_debug & VLOCK_DEBUG_FLASH)
+		pr_info("%s: idx = %d, addr = 0x%x, org_enc_line_num = %d, pre_enc_max_line = %d\n",
+			__func__,
+			pvlock->idx,
+			pvlock->enc_max_line_addr + pvlock->offset_encl,
+			pvlock->org_enc_line_num,
+			pvlock->pre_enc_max_line);
 
 	/* todo:vlock processs only for tv chip */
 	if (pvlock->dtdata->vlk_new_fsm)
@@ -3209,6 +3313,7 @@ void vlock_status(struct stvlock_sig_sts *pvlock)
 	pr_info("com_sts0 :0x%0x\n", pvlock->vdinsts.com_sts0);
 	pr_info("com_sts1 :0x%0x\n", pvlock->vdinsts.com_sts1);
 	pr_info("vlock_protect_min:%d\n", vlock_protect_min);
+	pr_info("vlock_manual:%d\n", vlock_manual);
 }
 
 void vlock_reg_dump(struct stvlock_sig_sts *pvlock)
@@ -3265,9 +3370,14 @@ void vlock_reg_dump(struct stvlock_sig_sts *pvlock)
 void vdin_vlock_input_sel(struct stvlock_sig_sts *vlock, unsigned int type,
 			  enum vframe_source_type_e source_type)
 {
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
 	u32 offset_vlck;
 	//u32 offset_enc = pvlock->offset_enc;
+#ifdef VLOCK_DEBUG_ENC_IDX
+	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
+#else
+	pvlock = vlock;
+#endif
 
 	if (!pvlock)
 		return;
@@ -3370,8 +3480,12 @@ int vlock_notify_callback(struct notifier_block *block, unsigned long cmd,
 {
 	const struct vinfo_s *vinfo;
 	u32 cnt = 0;
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
 
+	enc_mux = get_cur_enc_mode();
+
+	pvlock = vlock_tab[enc_mux];
 #ifdef VLOCK_DEBUG_ENC_IDX
 	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
 #endif
@@ -3396,6 +3510,7 @@ int vlock_notify_callback(struct notifier_block *block, unsigned long cmd,
 		pvlock->fsm_pause = true;
 		pvlock->fsm_sts = VLOCK_STATE_NULL;
 		vlock_notify_event = cmd;
+		frame_lock_mode_chg(cmd);
 		if (pvlock->dtdata->vlk_new_fsm &&
 		    pvlock->fsm_sts >= VLOCK_STATE_ENABLE_STEP1_DONE &&
 		    pvlock->fsm_sts <= VLOCK_STATE_DISABLE_STEP1_DONE) {
@@ -3413,6 +3528,7 @@ int vlock_notify_callback(struct notifier_block *block, unsigned long cmd,
 		pvlock->fsm_pause = false;
 		pvlock->fsm_sts = VLOCK_STATE_NULL;
 		vlock_notify_event = cmd;
+		frame_lock_mode_chg(cmd);
 		pr_info("vlock: event MODE_CHANGE\n");
 		break;
 
@@ -3519,7 +3635,16 @@ ssize_t vlock_debug_store(struct class *cla,
 	long val;
 	unsigned int temp_val;
 	enum vlock_param_e sel = VLOCK_PARAM_MAX;
-	struct stvlock_sig_sts *pvlock = vlock_tab[VLOCK_ENC0];
+	struct stvlock_sig_sts *pvlock;
+	enum vlock_enc_num_e enc_mux = VLOCK_ENC0;
+
+	enc_mux = get_cur_enc_mode();
+
+#ifdef VLOCK_DEBUG_ENC_IDX
+	pvlock = vlock_tab[VLOCK_DEBUG_ENC_IDX];
+#else
+	pvlock = vlock_tab[enc_mux];
+#endif
 
 	if (!buf)
 		return count;

@@ -114,6 +114,9 @@
 #define VFRAME_FLAG_MIRROR_H                    0x10000000 /*mirror frame horizontally*/
 #define VFRAME_FLAG_MIRROR_V                    0x20000000 /*mirror frame vertically*/
 #define VFRAME_FLAG_PC_MODE			0x40000000
+#define VFRAME_FLAG_DI_BYPASS			0x08000000
+#define VFRAME_FLAG_DI_GET			0x10000000
+#define VFRAME_FLAG_DI_PVPPLINK			0x20000000
 
 /* need check folllowing bits when toggle frame, to trigger property change */
 /* add more bits which indicates display attr change in vf->flag */
@@ -197,7 +200,7 @@ struct tvin_hdr10p_data_s {
 
 /*vdin dolby vsi info param*/
 struct tvin_dv_vsif_s {
-	u8 dobly_vision_signal:1;
+	u8 dolby_vision_signal:1;
 	u8 backlt_ctrl_MD_present:1;
 	u8 auxiliary_MD_present:1;
 	u8 eff_tmax_PQ_hi;
@@ -338,6 +341,7 @@ struct vframe_src_fmt_s {
 	int comp_size;
 	int parse_ret_flags;
 	u32 play_id;
+	int dv_id;
 };
 
 enum pic_mode_provider_e {

@@ -16,7 +16,7 @@ size_t osd_canvas_align(size_t x);
 #define CANVAS_ALIGNED(x) (((x) + 63) & ~63)
 #define MAX_HOLD_LINE     0x1f
 #define MIN_HOLD_LINE     0x04
-#define VIU1_DEFAULT_HOLD_LINE  0x08
+#define VIU1_DEFAULT_HOLD_LINE  0x04
 #define VIU2_DEFAULT_HOLD_LINE  0x04
 //#define REG_OFFSET (0x20)
 #define OSD_RELATIVE_BITS 0x33330
@@ -85,6 +85,9 @@ void osd_get_window_axis_hw(u32 index, s32 *x0, s32 *y0,
 			    s32 *x1, s32 *y1);
 void osd_set_window_axis_hw(u32 index, s32 x0, s32 y0, s32 x1, s32 y1);
 void osd_set_scale_axis_hw(u32 index, s32 x0, s32 y0, s32 x1, s32 y1);
+void osd_set_src_position_from_reg(u32 index,
+	s32 src_x_start, s32 src_x_end,
+	s32 src_y_start, s32 src_y_end);
 s32 osd_get_position_from_reg(u32 index,
 			      s32 *src_x_start, s32 *src_x_end,
 			      s32 *src_y_start, s32 *src_y_end,
@@ -236,4 +239,6 @@ void osd_set_display_fb(u32 index, u32 osd_display_fb);
 void osd_get_sc_depend(u32 *osd_sc_depend);
 void osd_set_sc_depend(u32 osd_sc_depend);
 void osd_get_fence_count(u32 index, u32 *fence_cnt, u32 *timeline_cnt);
+int get_encp_line(u32 viu_type);
+u32 get_cur_begine_line(u32 output_index);
 #endif

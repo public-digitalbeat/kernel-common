@@ -119,40 +119,13 @@ struct gdc_dmabuf_exp_s {
 #define GDC_SYNC_CPU _IOW(GDC_IOC_MAGIC, 0x0a, int)
 #define GDC_PROCESS_WITH_FW _IOW(GDC_IOC_MAGIC, 0x0b, \
 					struct gdc_settings_with_fw)
+#define GDC_GET_VERSION _IOR(GDC_IOC_MAGIC, 0x0c, int)
 
 enum {
 	INPUT_BUFF_TYPE = 0x1000,
 	OUTPUT_BUFF_TYPE,
 	CONFIG_BUFF_TYPE,
 	GDC_BUFF_TYPE_MAX
-};
-
-/* format type and format bit width mask
- * example: (NV12 | BIT_16) means nv12 16bit.
- */
-#define FORMAT_TYPE_MASK  0xffff
-#define FORMAT_IN_BITW_MASK   0x0f0000
-#define FORMAT_OUT_BITW_MASK  0xf00000
-
-enum {
-	NV12 = 1,
-	YV12,
-	Y_GREY,
-	YUV444_P,
-	RGB444_P,
-	FMT_MAX
-};
-
-enum {
-	IN_BITW_8   = 0, /* default input bit width */
-	IN_BITW_10  = (1 << 16),
-	IN_BITW_12  = (1 << 17),
-	IN_BITW_16  = (1 << 18),
-
-	OUT_BITW_8  = 0, /* default output bit width */
-	OUT_BITW_10 = (1 << 20),
-	OUT_BITW_12 = (1 << 21),
-	OUT_BITW_16 = (1 << 22)
 };
 
 enum {
@@ -384,4 +357,7 @@ int gdc_pwr_config(bool enable, u32 dev_type, u32 core_id);
 
 void gdc_pwr_remove(struct gdc_pd *pd);
 
+void gdc_runtime_pwr_all(u32 dev_type, bool enable);
+
+void gdc_clk_config_all(u32 dev_type, bool enable);
 #endif

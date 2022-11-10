@@ -41,6 +41,11 @@
 		#size-cells = <2>;
 		ranges;
 
+		ramdump_bl33z@00000000 {
+			reg = <0x0 0x0 0x0 0x1800000>; /* 0 ~ 24M */
+			status = "disabled";
+		};
+
 		ramoops@0x07400000 {
 			compatible = "ramoops";
 			reg = <0x0 0x07400000 0x0 0x00100000>;
@@ -70,21 +75,16 @@
 		};
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			/* keep sync with fb, fox example:logo_addr = "0x7f800000"*/
-			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x7f800000 0x0 0x800000>;
+			reg = <0x0 0x7f800000 0x0 0x800000>;
 		};
 
 		lcd_tcon_reserved:linux,lcd_tcon {
-			compatible = "shared-dma-pool";
-			reusable;
-			/* alloc-ranges start should not be 0x0*/
-			size = <0x0 0x00c00000>;
-			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3ec00000 0x0 0x00c00000>;
+			compatible = "amlogic, lcd_tcon";
+			reg = <0x0 0x3ec00000 0x0 0x00c00000>;
+			no-map;
 		};
 
 		ion_cma_reserved:linux,ion-dev {
@@ -93,11 +93,11 @@
 			size = <0x0 0x8000000>;
 			alignment = <0x0 0x400000>;
 		};
-		/* secure ion for gpu,advice size is 0x8000000 */
+		/* secure ion for gpu, advice size is 80M */
 		ion_secure_reserved:linux,ion-secure {
 			compatible = "amlogic, ion-secure-mem";
 			no-map;
-			size = <0x0 0x0000000>;
+			size = <0x0 0x5000000>;
 			alignment = <0x0 0x400000>;
 		};
 		ion_fb_reserved:linux,ion-fb {
@@ -320,7 +320,7 @@
 		compatible = "amlogic,unifykey";
 		status = "okay";
 
-		unifykey-num = <25>;
+		unifykey-num = <26>;
 		unifykey-index-0 = <&keysn_0>;
 		unifykey-index-1 = <&keysn_1>;
 		unifykey-index-2 = <&keysn_2>;
@@ -876,7 +876,7 @@
 		compatible = "amlogic, t3_frc";
 		dev_name = "aml_frc";
 		status = "okay";
-		frc_en = <1>;/*1:enabel ;0:disable*/
+		frc_en = <1>;/*1:enable ;0:disable*/
 		frc_hw_pos = <0>;/*0:before postblend; 1:after postblend*/
 		interrupts = <GIC_SPI 286 IRQ_TYPE_EDGE_RISING
 				GIC_SPI 287 IRQ_TYPE_EDGE_RISING
@@ -1523,8 +1523,7 @@
 			groups = "tcon_1","tcon_2","tcon_3",
 				"tcon_4","tcon_5","tcon_6",
 				"tcon_9","tcon_10","tcon_11",
-				"tcon_12","tcon_14",
-				"tcon_lock";
+				"tcon_14", "tcon_lock";
 			function = "tcon";
 		};
 	};
@@ -1533,8 +1532,26 @@
 			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
 				"GPIOH_4","GPIOH_5","GPIOH_6",
 				"GPIOH_9","GPIOH_10","GPIOH_11",
-				"GPIOH_12","GPIOH_14",
-				"GPIOH_0";
+				"GPIOH_14", "GPIOH_0";
+				function = "gpio_periphs";
+			input-enable;
+		};
+	};
+	ST5461D18_2_pins: ST5461D18_2_pin {
+		mux {
+			groups = "tcon_1","tcon_2","tcon_3",
+				"tcon_4","tcon_5","tcon_6",
+				"tcon_9","tcon_10","tcon_11",
+				"tcon_14","tcon_lock";
+			function = "tcon";
+		};
+	};
+	ST5461D18_2_off_pins: ST5461D18_2_off_pin {
+		mux {
+			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
+				"GPIOH_4","GPIOH_5","GPIOH_6",
+				"GPIOH_9","GPIOH_10","GPIOH_11",
+				"GPIOH_14","GPIOH_0";
 				function = "gpio_periphs";
 			input-enable;
 		};
@@ -1557,9 +1574,9 @@
 
 &amlvecm {
 	status = "okay";
-	gamma_en = <1>;/*1:enabel ;0:disable*/
-	wb_en = <1>;/*1:enabel ;0:disable*/
-	cm_en = <1>;/*1:enabel ;0:disable*/
+	gamma_en = <1>;/*1:enable ;0:disable*/
+	wb_en = <1>;/*1:enable ;0:disable*/
+	cm_en = <1>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	ct_3dlut = <0>;
@@ -1711,8 +1728,9 @@
 &spicc1 {	//for UWB/LocalDimm
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&spicc1_pins>;
-	cs-gpios = <&gpio GPIOH_24 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&spicc1_pins &spicc1_cs_pins>;
+	cs2clk-us = <2>;
+	clk2cs-us = <12>;
 };
 
 &spicc2 {

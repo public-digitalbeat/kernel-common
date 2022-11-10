@@ -24,6 +24,7 @@
 #include <linux/major.h>
 #include <linux/uaccess.h>
 #include <linux/cdev.h>
+#include <linux/compat.h>
 
 /* Amlogic Headers */
 #include <linux/amlogic/media/vout/vout_notify.h>
@@ -247,7 +248,7 @@ EXPORT_SYMBOL(get_vout_mode_uboot_state);
 
 #define MAX_UEVENT_LEN 64
 
-static int vout_set_uevent(unsigned int vout_event, int val)
+int vout_set_uevent(unsigned int vout_event, int val)
 {
 	char env[MAX_UEVENT_LEN];
 	char *envp[2];
@@ -270,6 +271,7 @@ static int vout_set_uevent(unsigned int vout_event, int val)
 
 	return ret;
 }
+EXPORT_SYMBOL(vout_set_uevent);
 
 int set_vout_mode_pre_process(enum vmode_e mode)
 {
@@ -496,7 +498,7 @@ static ssize_t vout_frame_rate_show(struct class *class,
 	int ret = 0;
 
 	fr = vout_frame_rate_measure();
-	ret = sprintf(buf, "%d.%3d\n", (fr / 1000), (fr % 1000));
+	ret = sprintf(buf, "%d.%03d\n", (fr / 1000), (fr % 1000));
 
 	return ret;
 }

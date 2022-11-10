@@ -501,21 +501,9 @@ static int meson_cpufreq_set_target(struct cpufreq_policy *policy,
 		if (ret) {
 			pr_err("failed to scale volt %u %u down: %d\n",
 			       volt_new, volt_tol, ret);
-			freqs.old = freq_new / 1000;
-			freqs.new = freq_old / 1000;
-			freq_new = freqs.new;
-			opp = dev_pm_opp_find_freq_ceil(cpu_dev, &freq_new);
-			volt_new = dev_pm_opp_get_voltage(opp);
-			dev_pm_opp_put(opp);
-			meson_dsu_volt_freq_vote(cpufreq_data, &freqs, volt_new);
-			meson_dsuvolt_adjust(cpufreq_data);
-
-			meson_dsufreq_adjust(cpufreq_data, &freqs, CPUFREQ_PRECHANGE);
-			meson_cpufreq_set_rate(policy, cur_cluster, freq_old / 1000);
-			meson_dsufreq_adjust(cpufreq_data, &freqs, CPUFREQ_POSTCHANGE);
-		} else {
-			meson_dsuvolt_adjust(cpufreq_data);
+			return ret;
 		}
+		meson_dsuvolt_adjust(cpufreq_data);
 	}
 
 	freq_new = clk_get_rate(clk[cur_cluster]) / 1000000;
@@ -921,12 +909,14 @@ static int meson_cpufreq_init(struct cpufreq_policy *policy)
 		       PTR_ERR(cpu_reg));
 		cpu_reg = NULL;
 	}
-	dsu_reg = regulator_get_optional(cpu_dev, DSU_SUPPLY);
-	if (IS_ERR(dsu_reg)) {
-		pr_info("[cluster%d]get dsu_regulator failed.\n", cur_cluster);
-		dsu_reg = NULL;
-	} else {
-		pr_info("[cluster%d]get dsu_regulator succeed.\n", cur_cluster);
+	if (of_get_child_by_name(np, "dsu-supply")) {
+		dsu_reg = regulator_get_optional(cpu_dev, DSU_SUPPLY);
+		if (IS_ERR(dsu_reg)) {
+			pr_info("[cluster%d]get dsu_regulator failed.\n", cur_cluster);
+			dsu_reg = NULL;
+		} else {
+			pr_info("[cluster%d]get dsu_regulator succeed.\n", cur_cluster);
+		}
 	}
 
 	cpu_supply_external_used = of_property_read_bool(np, "cpu_supply_external_used");
@@ -970,6 +960,10 @@ static int meson_cpufreq_init(struct cpufreq_policy *policy)
 
 	if (of_property_read_u32(np, "clock-latency", &transition_latency))
 		policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
+	if (of_property_read_u32(np, "suspend-freq", &policy->suspend_freq))
+		policy->suspend_freq = get_table_max(freq_table[cur_cluster]);
+	else
+		policy->suspend_freq = cpufreq_driver_resolve_freq(policy, policy->suspend_freq);
 
 	cpufreq_data->clusterid = cur_cluster;
 	cpufreq_data->cpu_dev = cpu_dev;
@@ -989,7 +983,6 @@ static int meson_cpufreq_init(struct cpufreq_policy *policy)
 	policy->driver_data = cpufreq_data;
 	policy->clk = clk[cur_cluster];
 	policy->cpuinfo.transition_latency = transition_latency;
-	policy->suspend_freq = get_table_max(freq_table[cur_cluster]);
 	policy->cur = clk_get_rate(clk[cur_cluster]) / 1000;
 
 	/*

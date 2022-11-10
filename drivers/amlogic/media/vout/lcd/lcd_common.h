@@ -35,7 +35,15 @@
 /* 20220119: support tcon multi list threshold overlap*/
 /* 20220121: update custom_pinmux and fr_auto_dis support*/
 /* 20220216: update vrr config when display mode change*/
-#define LCD_DRV_VERSION    "20220216"
+/* 20220408: update tcon reserved memory usage*/
+/* 20220421: fix lcd clk mistake for vmode change with fr_adj_type 4*/
+/* 20220426: update lcd mute control for DLG switch*/
+/* 20220428: fix t5w regs mistake*/
+/* 20220622: support tcon dynamic gamma*/
+/* 20220719: support t5,t5w,t3 set vswing level in low common type*/
+/* 20220729: optimize tcon switch flow before dlg timing change*/
+/* 20220809: fix tcon axi mem mistake for DLG tcon bin*/
+#define LCD_DRV_VERSION    "20220809"
 
 extern struct mutex lcd_vout_mutex;
 extern spinlock_t lcd_reg_spinlock;
@@ -90,6 +98,7 @@ void lcd_vout_notify_mode_change_pre(struct aml_lcd_drv_s *pdrv);
 void lcd_vout_notify_mode_change(struct aml_lcd_drv_s *pdrv);
 void lcd_vinfo_update(struct aml_lcd_drv_s *pdrv);
 unsigned int lcd_vrr_lfc_switch(void *dev_data, int fps);
+int lcd_vrr_disable_cb(void *dev_data);
 void lcd_vrr_dev_update(struct aml_lcd_drv_s *pdrv);
 
 void lcd_queue_work(struct work_struct *work);
@@ -139,22 +148,26 @@ int lcd_tcon_core_reg_get(struct aml_lcd_drv_s *pdrv,
 			  unsigned char *buf, unsigned int size);
 int lcd_tcon_enable(struct aml_lcd_drv_s *pdrv);
 int lcd_tcon_reload(struct aml_lcd_drv_s *pdrv);
+int lcd_tcon_reload_pre(struct aml_lcd_drv_s *pdrv);
 void lcd_tcon_disable(struct aml_lcd_drv_s *pdrv);
 void lcd_tcon_vsync_isr(struct aml_lcd_drv_s *pdrv);
 
 /* lcd debug */
 int lcd_debug_info_len(int num);
 void lcd_debug_test(struct aml_lcd_drv_s *pdrv, unsigned int num);
+void lcd_test_pattern_init(struct aml_lcd_drv_s *pdrv, unsigned int num);
 int lcd_debug_probe(struct aml_lcd_drv_s *pdrv);
 int lcd_debug_remove(struct aml_lcd_drv_s *pdrv);
 
 /* lcd venc */
+unsigned int lcd_get_encl_lint_cnt(struct aml_lcd_drv_s *pdrv);
 void lcd_wait_vsync(struct aml_lcd_drv_s *pdrv);
 void lcd_gamma_check_en(struct aml_lcd_drv_s *pdrv);
 void lcd_gamma_debug_test_en(struct aml_lcd_drv_s *pdrv, int flag);
 void lcd_set_venc_timing(struct aml_lcd_drv_s *pdrv);
 void lcd_set_venc(struct aml_lcd_drv_s *pdrv);
 void lcd_venc_change(struct aml_lcd_drv_s *pdrv);
+void lcd_venc_vrr_recovery(struct aml_lcd_drv_s *pdrv);
 
 /* lcd driver */
 #ifdef CONFIG_AMLOGIC_LCD_TV
@@ -185,5 +198,8 @@ void lcd_tablet_clk_update(struct aml_lcd_drv_s *pdrv);
 int lcd_mode_tablet_init(struct aml_lcd_drv_s *pdrv);
 int lcd_mode_tablet_remove(struct aml_lcd_drv_s *pdrv);
 #endif
+
+int lcd_drm_add(struct device *dev);
+void lcd_drm_remove(struct device *dev);
 
 #endif

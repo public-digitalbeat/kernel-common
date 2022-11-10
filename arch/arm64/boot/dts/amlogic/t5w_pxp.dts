@@ -44,13 +44,12 @@
 		};
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			/* keep sync with fb */
 			/* fox example:logo_addr = "0x3f800000"*/
 			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3f800000 0x0 0x800000>;
+			reg = <0x0 0x3f800000 0x0 0x800000>;
 		};
 
 		codec_mm_cma:linux,codec_mm_cma {
@@ -217,9 +216,9 @@
 
 &amlvecm {
 	status = "okay";
-	gamma_en = <1>;/*1:enabel ;0:disable*/
-	wb_en = <1>;/*1:enabel ;0:disable*/
-	cm_en = <1>;/*1:enabel ;0:disable*/
+	gamma_en = <1>;/*1:enable ;0:disable*/
+	wb_en = <1>;/*1:enable ;0:disable*/
+	cm_en = <1>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	vlock_mode = <0x8>;

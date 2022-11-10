@@ -37,30 +37,37 @@ struct dmc_monitor *dmc_mon;
 static unsigned long init_dev_mask;
 static unsigned long init_start_addr;
 static unsigned long init_end_addr;
+static unsigned long init_dmc_config;
 
 static int early_dmc_param(char *buf)
 {
-	unsigned long s_addr, e_addr, mask;
+	unsigned long s_addr, e_addr, mask, config = 0;
 	/*
 	 * Patten:  dmc_montiro=[start_addr],[end_addr],[mask]
 	 * Example: dmc_monitor=0x00000000,0x20000000,0x7fce
+	 * config: bit 0 - exclude (t3/t7/p1/c3)
+	 *	   bit 1 - write;
+	 *	   bit 2 - read;
+	 *	   bit 3 - cma print;
 	 */
 	if (!buf)
 		return -EINVAL;
 
-	if (sscanf(buf, "%lx,%lx,%lx", &s_addr, &e_addr, &mask) != 3)
-		return -EINVAL;
+	if (sscanf(buf, "%lx,%lx,%lx,%lx", &s_addr, &e_addr, &mask, &config) != 4) {
+		if (sscanf(buf, "%lx,%lx,%lx", &s_addr, &e_addr, &mask) != 3)
+			return -EINVAL;
+	}
 
 	init_start_addr = s_addr;
 	init_end_addr   = e_addr;
 	init_dev_mask   = mask;
+	init_dmc_config = config;
 
-	pr_info("%s, buf:%s, %lx-%lx, %lx\n",
-		__func__, buf, s_addr, e_addr, mask);
+	pr_info("%s, buf:%s, %lx-%lx, %lx, %lx\n",
+		__func__, buf, s_addr, e_addr, mask, config);
 
 	return 0;
 }
-
 __setup("dmc_monitor=", early_dmc_param);
 
 void show_violation_mem(unsigned long addr)
@@ -144,7 +151,7 @@ char *to_ports(int id)
  */
 char *to_sub_ports_name(int mid, int sid, char *id_str, char rw)
 {
-	int i, s_port;
+	int i, s_port = -1;
 
 	/* 7 is device port id */
 	/* t5w 7 and 10 is device port id */
@@ -408,7 +415,7 @@ static ssize_t device_store(struct class *cla,
 				pr_info("bad device:%s\n", buf);
 				return -EINVAL;
 			}
-			dmc_regulation_dev(1 << i, 1);
+			dmc_regulation_dev(1UL << i, 1);
 		}
 	}
 	if (dmc_mon->addr_start < dmc_mon->addr_end && dmc_mon->ops &&
@@ -510,6 +517,7 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 {
 	/* set default parameters */
 	mon->debug = 0x01;
+	mon->mon_number = 1;
 
 	switch (chip) {
 #ifdef CONFIG_AMLOGIC_DMC_MONITOR_G12
@@ -518,13 +526,11 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 	case DMC_TYPE_SM1:
 	case DMC_TYPE_TL1:
 		mon->ops = &g12_dmc_mon_ops;
-		mon->mon_number = 1;
 		break;
 #endif
 #ifdef CONFIG_AMLOGIC_DMC_MONITOR_C1
 	case DMC_TYPE_C1:
 		mon->ops = &c1_dmc_mon_ops;
-		mon->mon_number = 1;
 		break;
 #endif
 #ifdef CONFIG_AMLOGIC_DMC_MONITOR_GX
@@ -538,7 +544,6 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 	case DMC_TYPE_GXLX:
 	case DMC_TYPE_TXHD:
 		mon->ops = &gx_dmc_mon_ops;
-		mon->mon_number = 1;
 		break;
 #endif
 #ifdef CONFIG_AMLOGIC_DMC_MONITOR_TM2
@@ -551,7 +556,6 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 		#else
 			#error need support for revA
 		#endif
-		mon->mon_number = 1;
 		break;
 
 	case DMC_TYPE_SC2:
@@ -561,7 +565,6 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 	case DMC_TYPE_T5:
 	case DMC_TYPE_T5D:
 		mon->ops = &tm2_dmc_mon_ops;
-		mon->mon_number = 1;
 		break;
 #endif
 #ifdef CONFIG_AMLOGIC_DMC_MONITOR_T7
@@ -584,7 +587,6 @@ static void __init get_dmc_ops(int chip, struct dmc_monitor *mon)
 	case DMC_TYPE_T5W:
 	case DMC_TYPE_A5:
 		mon->ops = &s4_dmc_mon_ops;
-		mon->mon_number = 1;
 		break;
 #endif
 	default:
@@ -722,6 +724,12 @@ static int __init dmc_monitor_probe(struct platform_device *pdev)
 	}
 	INIT_DELAYED_WORK(&dmc_mon->work, clear_irq_work);
 	schedule_delayed_work(&dmc_mon->work, HZ);
+
+	if (init_dmc_config >> 1)
+		dmc_mon->debug = init_dmc_config >> 1;
+
+	if (init_dmc_config & 0x1)
+		dmc_mon->configs &= ~POLICY_INCLUDE;
 
 	if (init_dev_mask)
 		dmc_set_monitor(init_start_addr,

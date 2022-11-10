@@ -115,7 +115,7 @@ config ARM64
 	select GENERIC_TIME_VSYSCALL
 	select GENERIC_GETTIMEOFDAY
 	select HANDLE_DOMAIN_IRQ
-	select HARDIRQS_SW_RESEND
+	select HARDIRQS_SW_RESEND if !AMLOGIC_MODIFY
 	select HAVE_MOVE_PMD
 	select HAVE_MOVE_PUD
 	select HAVE_PCI
@@ -1153,7 +1153,7 @@ config ARM64_SSBD
 
 config MITIGATE_SPECTRE_BRANCH_HISTORY
 	bool "Mitigate Spectre style attacks against branch history" if EXPERT
-	default n
+	default y
 	help
 	  Speculation attacks against some high-performance processors can
 	  make use of branch history to influence future speculation.

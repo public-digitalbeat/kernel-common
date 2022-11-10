@@ -53,18 +53,14 @@
 			reusable;
 			/* keep sync with fb */
 			/* fox example:logo_addr = "0x3f800000"*/
-			size = <0x0 0x800000>;
 			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3f800000 0x0 0x800000>;
+			reg = <0x0 0x3f800000 0x0 0x800000>;
 		};
 
 		lcd_tcon_reserved:linux,lcd_tcon {
-			compatible = "shared-dma-pool";
-			reusable;
-			/* alloc-ranges start should not be 0x0*/
-			size = <0x0 0x00c00000>;
-			alignment = <0x0 0x400000>;
-			alloc-ranges = <0x0 0x3c000000 0x0 0x00c00000>;
+			compatible = "amlogic, lcd_tcon";
+			reg = <0x0 0x3c000000 0x0 0x00c00000>;
+			no-map;
 		};
 
 		/*  vdin0 CMA pool */
@@ -628,6 +624,7 @@
 		en_4k_2_2k = <0>;
 		hpd_low_cec_off = <0>;
 		arc_port = <1>;
+		vrr_range_dynamic_update_en = <1>;
 		/* bit4: enable feature, bit3~0: port number */
 		disable_port = <0x0>;
 		/* MAP_ADDR_MODULE_CBUS */
@@ -1409,9 +1406,9 @@
 
 &amlvecm {
 	status = "okay";
-	gamma_en = <1>;/*1:enabel ;0:disable*/
-	wb_en = <1>;/*1:enabel ;0:disable*/
-	cm_en = <1>;/*1:enabel ;0:disable*/
+	gamma_en = <1>;/*1:enable ;0:disable*/
+	wb_en = <1>;/*1:enable ;0:disable*/
+	cm_en = <1>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	vlock_mode = <0x8>;
@@ -1477,6 +1474,26 @@
 	status = "okay";
 	logo_addr = "0x3f800000";
 
+	connectors_dev: port@2 {
+		drm_to_lcd0: endpoint@2 {
+			reg = <2>;
+			remote-endpoint = <&lcd0_to_drm>;
+		};
+	};
+
+};
+
+&lcd {
+	ports {
+		port {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			lcd0_to_drm: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&drm_to_lcd0>;
+			};
+		};
+	};
 };
 
 &drm_amhdmitx {
@@ -1486,10 +1503,6 @@
 
 &drm_amcvbsout {
 	status = "disabled";
-};
-
-&drm_lcd {
-	status = "okay";
 };
 
 &crg {
@@ -1571,6 +1584,44 @@
 			groups = "GPIOH_12","GPIOH_13";
 			function = "gpio_periphs";
 			output-low;
+		};
+	};
+	ST6451D06_3_pins: ST6451D06_3_pin {
+		mux {
+			groups = "tcon_1","tcon_2","tcon_3",
+				"tcon_4","tcon_5","tcon_6",
+				"tcon_9","tcon_10","tcon_11",
+				"tcon_14","tcon_lock";
+			function = "tcon";
+		};
+	};
+	ST6451D06_3_off_pins: ST6451D06_3_off_pin {
+		mux {
+			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
+				"GPIOH_4","GPIOH_5","GPIOH_6",
+				"GPIOH_9","GPIOH_10","GPIOH_11",
+				"GPIOH_14","GPIOH_0";
+				function = "gpio_periphs";
+			input-enable;
+		};
+	};
+	ST5461D18_2_pins: ST5461D18_2_pin {
+		mux {
+			groups = "tcon_1","tcon_2","tcon_3",
+				"tcon_4","tcon_5","tcon_6",
+				"tcon_9","tcon_10","tcon_11",
+				"tcon_14","tcon_lock";
+			function = "tcon";
+		};
+	};
+	ST5461D18_2_off_pins: ST5461D18_2_off_pin {
+		mux {
+			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
+				"GPIOH_4","GPIOH_5","GPIOH_6",
+				"GPIOH_9","GPIOH_10","GPIOH_11",
+				"GPIOH_14","GPIOH_0";
+				function = "gpio_periphs";
+			input-enable;
 		};
 	};
 };

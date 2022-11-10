@@ -30,6 +30,7 @@
 #include <linux/timer.h>
 #include <linux/atomic.h>
 #include <linux/of.h>
+#include <linux/compat.h>
 #include <linux/of_device.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
@@ -867,12 +868,14 @@ void adc_pll_down(void)
 		adc_wr_hiu_bits(adc_addr->vdac_cntl_1, 0, 7, 1);
 		adc_wr_hiu_bits(adc_addr->dadc_cntl_3, 0, 0, 2);
 		adc_wr_hiu_bits(pll_addr->adc_pll_cntl_0, 0, 28, 1);
-		if (adc_devp->plat_data->is_tv_chip) {
+		if (adc_devp->plat_data->is_tv_chip)
 			adc_wr_hiu_bits(adc_addr->s2_dadc_cntl_2, 0, 8, 1);
-			adc_wr_afe(AFE_VAFE_CTRL0, 0x0);
-			adc_wr_afe(AFE_VAFE_CTRL1, 0x0);
-			adc_wr_afe(AFE_VAFE_CTRL2, 0x0);
-		}
+	}
+
+	if (adc_devp->plat_data->is_tv_chip) {
+		adc_wr_afe(AFE_VAFE_CTRL0, 0x0);
+		adc_wr_afe(AFE_VAFE_CTRL1, 0x0);
+		adc_wr_afe(AFE_VAFE_CTRL2, 0x0);
 	}
 }
 EXPORT_SYMBOL(adc_pll_down);

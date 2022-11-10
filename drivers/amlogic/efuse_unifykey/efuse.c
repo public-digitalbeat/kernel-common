@@ -17,7 +17,7 @@
 #include <linux/amlogic/efuse.h>
 #include <linux/io.h>
 #include <linux/amlogic/secmon.h>
-
+#include <linux/compat.h>
 #define EFUSE_DEVICE_NAME   "efuse"
 #define EFUSE_CLASS_NAME    "efuse"
 
@@ -108,7 +108,7 @@ int efuse_burn_lockable_is_cfg(char *itemname)
 }
 
 /*
- * retrun: 1:burned(wrote), 0: not write, -1: fail
+ * return: 1:burned(written), 0: not write, -1: fail
  */
 int efuse_burn_check_burned(char *itemname)
 {
@@ -691,9 +691,9 @@ static ssize_t checkburn_show(struct class *cla,
 		if (efuse_burn_lockable_is_cfg(efuse_dev->name) == 0) {
 			n = efuse_burn_check_burned(efuse_dev->name);
 			if (n == 1)
-				n = sprintf(buf, "wrote");
+				n = sprintf(buf, "written");
 			else if (n == 0)
-				n = sprintf(buf, "notwrite");
+				n = sprintf(buf, "not write");
 			else
 				n = sprintf(buf, "error");
 		} else {
@@ -1219,7 +1219,7 @@ static int efuse_probe(struct platform_device *pdev)
 
 	efuse_clk = devm_clk_get(&pdev->dev, "efuse_clk");
 	if (IS_ERR(efuse_clk)) {
-		dev_err(&pdev->dev, "can't get efuse clk gate, use default clk\n");
+		dev_dbg(&pdev->dev, "can't get efuse clk gate, use default clk\n");
 	} else {
 		ret = clk_prepare_enable(efuse_clk);
 		if (ret) {
@@ -1334,7 +1334,7 @@ static int efuse_probe(struct platform_device *pdev)
 	sharemem_input_base = get_meson_sm_input_base();
 	sharemem_output_base = get_meson_sm_output_base();
 
-	dev_info(&pdev->dev, "device %s created OK\n", EFUSE_DEVICE_NAME);
+	dev_dbg(&pdev->dev, "device %s created OK\n", EFUSE_DEVICE_NAME);
 	return 0;
 
 error4:
@@ -1365,7 +1365,7 @@ static int efuse_remove(struct platform_device *pdev)
 static const struct of_device_id efuse_dt_match[] = {
 	{	.compatible = "amlogic, efuse",
 	},
-	{},
+	{}
 };
 
 static struct platform_driver efuse_driver = {

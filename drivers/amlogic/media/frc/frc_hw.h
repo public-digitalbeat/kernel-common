@@ -38,10 +38,19 @@
 #define MAX_MC_Y_VRANG   64  // one side of Luma range(under MC scale)
 #define MAX_MC_C_VRANG   64  // one side of Chroma range
 
-#define MAX_INP_UNDONE_CNT         1
+#define MAX_INP_UNDONE_CNT         0x3F // 1
 #define MAX_ME_UNDONE_CNT          1
 #define MAX_MC_UNDONE_CNT          1
 #define MAX_VP_UNDONE_CNT          1
+
+//Bit 28:24  reg_buf_cfg_en       // unsigned ,    RW, default = 0
+// [0]:force mc buf_idx [1] force logo buf_idx [2]:force me_phase
+// [3] force mc_phase [4] force input_buf_idx
+#define FORCE_MC_BUFIDX            0x01000000
+#define FORCE_LOGO_BUFIDX          0x02000000
+#define FORCE_ME_PHASE             0x04000000
+#define FORCE_MC_PHASE             0x08000000
+#define FORCE_INPUT_BUFIDX         0x10000000
 
 extern void __iomem *frc_clk_base;
 extern void __iomem *vpu_base;
@@ -86,5 +95,10 @@ void frc_frame_forcebuf_count(u8 forceidx);
 void inp_undone_read(struct frc_dev_s *frc_devp);
 void vp_undone_read(struct frc_dev_s *frc_devp);
 u32 vpu_reg_read(u32 addr);
+void frc_check_hw_stats(struct frc_dev_s *frc_devp, u8 checkflag);
+u16 frc_check_vf_rate(u16 duration, struct frc_dev_s *frc_devp);
+void frc_get_film_base_vf(struct frc_dev_s *frc_devp);
+void frc_set_enter_forcefilm(struct frc_dev_s *frc_devp, u16 flag);
+void frc_set_notell_film(struct frc_dev_s *frc_devp, u16 flag);
 
 #endif

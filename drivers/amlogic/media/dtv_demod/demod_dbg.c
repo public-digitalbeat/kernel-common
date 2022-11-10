@@ -331,6 +331,7 @@ static void seq_dump_status(struct seq_file *seq)
 
 		case SYS_DVBS:
 		case SYS_DVBS2:
+			seq_printf(seq, "lock: %d.\n", (dvbs_rd_byte(0x160) >> 3) & 0x1);
 			dvbs_check_status(seq);
 			break;
 
@@ -632,16 +633,17 @@ static int read_memory_to_file(char *path, unsigned int start_addr,
 	return 0;
 }
 
-unsigned int capture_adc_data_once(char *path, unsigned int capture_mode)
+unsigned int capture_adc_data_once(char *path, unsigned int capture_mode,
+		unsigned int test_mode)
 {
 	struct amldtvdemod_device_s *devp = dtvdemod_get_dev();
-	int testbus_addr, width, vld;
-	unsigned int tb_start, tb_depth;
+	int testbus_addr = 0, width = 0, vld = 0;
+	unsigned int tb_start = 0, tb_depth = 0;
 	unsigned int start_addr = 0;
-	unsigned int top_saved, polling_en;
+	unsigned int top_saved = 0, polling_en = 0;
 	//struct dvb_frontend *fe;
 	struct aml_dtvdemod *demod = NULL, *tmp = NULL;
-	unsigned int offset, size;
+	unsigned int offset = 0, size = 0;
 
 	if (unlikely(!devp)) {
 		PR_ERR("%s:devp is NULL\n", __func__);
@@ -739,7 +741,10 @@ unsigned int capture_adc_data_once(char *path, unsigned int capture_mode)
 	front_write_bits(0x39, testbus_addr, 0, 16);
 
 	/* disable test_mode */
-	front_write_bits(0x3a, 0, 13, 1);
+	if (test_mode)
+		front_write_bits(0x3a, 1, 13, 1);
+	else
+		front_write_bits(0x3a, 0, 13, 1);
 	start_addr = devp->mem_start;
 
 	switch (demod->last_delsys) {
@@ -969,6 +974,7 @@ static void info_show(void)
 
 		case SYS_DVBS:
 		case SYS_DVBS2:
+			PR_INFO("lock: %d.\n", (dvbs_rd_byte(0x160) >> 3) & 0x1);
 			dvbs_check_status(NULL);
 			break;
 
@@ -1101,7 +1107,7 @@ static ssize_t attr_store(struct class *cls,
 	struct dtv_property tvp;
 	unsigned int delay;
 	enum fe_status sts;
-	unsigned int cap_mode;
+	unsigned int cap_mode = 0, test_mode = 0;
 
 	if (!buf)
 		return count;
@@ -1161,10 +1167,14 @@ static ssize_t attr_store(struct class *cls,
 			goto fail_exec_cmd;
 		}
 
-		if (parm[2] && kstrtouint(parm[2], 10, &cap_mode) == 0)
-			capture_adc_data_once(parm[1], cap_mode);
-		else
-			capture_adc_data_once(parm[1], 0);
+		if (parm[2] && kstrtouint(parm[2], 10, &cap_mode) == 0) {
+			if (parm[3] && kstrtouint(parm[3], 10, &test_mode) == 0)
+				capture_adc_data_once(parm[1], cap_mode, test_mode);
+			else
+				capture_adc_data_once(parm[1], cap_mode, 0);
+		} else {
+			capture_adc_data_once(parm[1], 0, 0);
+		}
 	} else if (!strcmp(parm[0], "state")) {
 		info_show();
 	} else if (!strcmp(parm[0], "delsys")) {
@@ -1415,26 +1425,29 @@ static ssize_t attr_show(struct class *cls,
 	/* struct amldtvdemod_device_s *devp = dev_get_drvdata(dev); */
 	ssize_t len = 0;
 
-	len += sprintf(buf + len, "symb_rate [val1]\n");
-	len += sprintf(buf + len, "symb_rate_en [val1]\n");
-	len += sprintf(buf + len, "capture [val1] [val2]\n");
-	len += sprintf(buf + len, "state\n");
-	len += sprintf(buf + len, "delsys [val1]\n");
-	len += sprintf(buf + len, "tune [val1]\n");
-	len += sprintf(buf + len, "stop_wr [val1]\n");
-	len += sprintf(buf + len, "lnb_en [val1]\n");
-	len += sprintf(buf + len, "lnb_sel [val1]\n");
-	len += sprintf(buf + len, "diseqc_reg\n");
-	len += sprintf(buf + len, "dvbsw [addr] [val]\n");
-	len += sprintf(buf + len, "dvbsr [addr]\n");
-	len += sprintf(buf + len, "dvbsd [addr] [len]\n");
-	len += sprintf(buf + len, "diseqc_dbg [val]\n");
-	len += sprintf(buf + len, "diseqc_sts\n");
-	len += sprintf(buf + len, "diseqc_cmd [val]\n");
-	len += sprintf(buf + len, "diseqc_burston [val]\n");
-	len += sprintf(buf + len, "diseqc_burstsa\n");
-	len += sprintf(buf + len, "diseqc_burstsb\n");
-	len += sprintf(buf + len, "diseqc_toneon [val]\n");
+	len += sprintf(buf + len, "\nDTV Demod Usage:\n");
+	len += sprintf(buf + len, "echo [CMD] > /sys/class/dtvdemod/attr\n");
+	len += sprintf(buf + len, "CMD:\n");
+	len += sprintf(buf + len, "\tsymb_rate [val]\n");
+	len += sprintf(buf + len, "\tsymb_rate_en [val]\n");
+	len += sprintf(buf + len, "\tstate\n");
+	len += sprintf(buf + len, "\tdelsys [deliver_system] [frequency_hz] [symbol_rate_bps] [bw_hz] [modulation]\n");
+	len += sprintf(buf + len, "\ttune [val]\n");
+	len += sprintf(buf + len, "\tfrontw|topw|dvbsw|atscw|dvbcw|dvbtw [addr] [val]\n");
+	len += sprintf(buf + len, "\tfrontr|topr|dvbsr|atscr|dvbcr|dvbtr [addr]\n");
+	len += sprintf(buf + len, "\tdvbsd [addr] [len]\n");
+	len += sprintf(buf + len, "\tlnb_en [val]\n");
+	len += sprintf(buf + len, "\tlnb_sel [val]\n");
+	len += sprintf(buf + len, "\tdiseqc_reg\n");
+	len += sprintf(buf + len, "\tdiseqc_dbg [val]\n");
+	len += sprintf(buf + len, "\tdiseqc_sts\n");
+	len += sprintf(buf + len, "\tdiseqc_cmd [val]\n");
+	len += sprintf(buf + len, "\tdiseqc_burston [val]\n");
+	len += sprintf(buf + len, "\tdiseqc_burstsa\n");
+	len += sprintf(buf + len, "\tdiseqc_burstsb\n");
+	len += sprintf(buf + len, "\tdiseqc_toneon [val]\n");
+	len += sprintf(buf + len, "\tcapture_once /data/hcap_XXX.bin [mode]\n");
+	len += sprintf(buf + len, "\t\tmode: 0 - others adc(default); 3 - ts, 4 - t/t2 adc; 5 - s/s2 adc.\n");
 
 	return len;
 }
@@ -1516,30 +1529,40 @@ static ssize_t atsc_para_show(struct class *cls,
 	if (!demod)
 		return 0;
 
-	if (demod->atsc_mode != VSB_8)
-		return 0;
-
-	if (atsc_mode_para == ATSC_READ_STRENGTH) {
-		strength = tuner_get_ch_power(&demod->frontend);
-		return sprintf(buf, "strength is %d\n", strength);
-	} else if (atsc_mode_para == ATSC_READ_SNR) {
-		snr = atsc_read_snr();
-		return sprintf(buf, "snr is %d\n", snr);
-	} else if (atsc_mode_para == ATSC_READ_LOCK) {
-		lock_status =
-			atsc_read_reg(0x0980);
-		return sprintf(buf, "lock_status is %x\n", lock_status);
-	} else if (atsc_mode_para == ATSC_READ_SER) {
-		ser = atsc_read_ser();
-		return sprintf(buf, "ser is %d\n", ser);
-	} else if (atsc_mode_para == ATSC_READ_FREQ) {
-		return sprintf(buf, "freq is %d\n", demod->freq);
-	} else if (atsc_mode_para == ATSC_READ_CK) {
-		ck = atsc_read_ck();
-		return sprintf(buf, "ck=0x%x lock=%d\n",
-						ck, demod->last_status);
-	} else {
-		return sprintf(buf, "atsc_para_show can't match mode\n");
+	if (demod->atsc_mode == QAM_64 || demod->atsc_mode == QAM_256 ||
+		demod->atsc_mode == QAM_AUTO) {
+		if (atsc_mode_para == ATSC_READ_STRENGTH) {
+			strength = tuner_get_ch_power(&demod->frontend);
+			return sprintf(buf, "strength is %d\n", strength);
+		} else if (atsc_mode_para == ATSC_READ_SER) {
+			ser = (unsigned int)dvbc_get_per(demod);
+			return sprintf(buf, "ser is %d\n", ser);
+		} else if (atsc_mode_para == ATSC_READ_FREQ) {
+			return sprintf(buf, "freq is %d\n", demod->freq);
+		} else {
+			return sprintf(buf, "atsc_para_shows can't match mode\n");
+		}
+	} else if (demod->atsc_mode == VSB_8) {
+		if (atsc_mode_para == ATSC_READ_STRENGTH) {
+			strength = tuner_get_ch_power(&demod->frontend);
+			return sprintf(buf, "strength is %d\n", strength);
+		} else if (atsc_mode_para == ATSC_READ_SNR) {
+			snr = atsc_read_snr();
+			return sprintf(buf, "snr is %d\n", snr);
+		} else if (atsc_mode_para == ATSC_READ_LOCK) {
+			lock_status = atsc_read_reg(0x0980);
+			return sprintf(buf, "lock_status is %x\n", lock_status);
+		} else if (atsc_mode_para == ATSC_READ_SER) {
+			ser = atsc_read_ser();
+			return sprintf(buf, "ser is %d\n", ser);
+		} else if (atsc_mode_para == ATSC_READ_FREQ) {
+			return sprintf(buf, "freq is %d\n", demod->freq);
+		} else if (atsc_mode_para == ATSC_READ_CK) {
+			ck = atsc_read_ck();
+			return sprintf(buf, "ck=0x%x lock=%d\n", ck, demod->last_status);
+		} else {
+			return sprintf(buf, "atsc_para_shows can't match mode\n");
+		}
 	}
 
 	return 0;

@@ -51,22 +51,17 @@
 		};
 
 		logo_reserved:linux,meson-fb {
-			compatible = "shared-dma-pool";
-			reusable;
+			compatible = "amlogic, meson-fb";
 			/* keep sync with fb */
 			/* fox example:logo_addr = "0x3f800000"*/
-			size = <0x800000>;
 			alignment = <0x400000>;
-			alloc-ranges = <0x3f800000 0x800000>;
+			reg = <0x2f800000 0x800000>;
 		};
 
 		lcd_tcon_reserved:linux,lcd_tcon {
-			compatible = "shared-dma-pool";
-			reusable;
-			/* alloc-ranges start should not be 0x0*/
-			size = <0x00c00000>;
-			alignment = <0x400000>;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			compatible = "amlogic, lcd_tcon";
+			reg = <0x2ec00000 0x00c00000>;
+			no-map;
 		};
 
 		/*  vdin0 CMA pool */
@@ -88,17 +83,17 @@
 			 */
 			size = <0x01400000>;
 			alignment = <0x400000>;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			alloc-ranges = <0x00000000 0x30000000>;
 		};
 
 		codec_mm_cma:linux,codec_mm_cma {
 			compatible = "shared-dma-pool";
 			reusable;
 			/* ion_codec_mm max can alloc size 80M*/
-			size = <0x17c00000>;
+			size = <0x10000000>;
 			alignment = <0x400000>;
 			linux,contiguous-region;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			alloc-ranges = <0x30000000 0x10000000>;
 		};
 
 		/* demod_cma_reserved:linux,demod_cma {
@@ -107,7 +102,7 @@
 		 *	// 40M
 		 *	size = <0x02800000>;
 		 *	alignment = <0x400000>;
-		 *	alloc-ranges = <0x00000000 0x3f800000>;
+		 *	alloc-ranges = <0x00000000 0x30000000>;
 		 *};
 		 */
 
@@ -145,9 +140,9 @@
 			 * size = 1920 * 1080 * 3 * 4
 			 * (RGBA: 4 bytes/pixel) + 4M(10% * afbc)
 			 */
-			size = <0x8000000>;
+			size = <0x400000>;
 			alignment = <0x400000>;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			alloc-ranges = <0x00000000 0x30000000>;
 		};
 
 		ion_fb_reserved:linux,ion-fb {
@@ -156,7 +151,7 @@
 			/* 1920x1080x4x3 round up 4M align */
 			size = <0x1c00000>;
 			alignment = <0x400000>;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			alloc-ranges = <0x00000000 0x30000000>;
 		};
 
 		ldc_mem_reserved:linux,ldc_mem {
@@ -164,7 +159,7 @@
 			reusable;
 			size = <0x400000>;
 			alignment = <0x400000>;
-			alloc-ranges = <0x00000000 0x3f800000>;
+			alloc-ranges = <0x00000000 0x30000000>;
 		};
 	};
 
@@ -646,6 +641,7 @@
 		en_4k_2_2k = <0>;
 		hpd_low_cec_off = <0>;
 		arc_port = <1>;
+		vrr_range_dynamic_update_en = <1>;
 		/* bit4: enable feature, bit3~0: port number */
 		disable_port = <0x0>;
 		/* MAP_ADDR_MODULE_CBUS */
@@ -664,8 +660,8 @@
 			0x0 0x0
 			0x0 0x0
 			0xff688000 0x18000
-			0xff646000 0x1fff>;
-		//	0xfe008000 0x280 0x334>;
+			0xff646000 0x1fff
+			0xfe008280 0xb4>;
 	};
 
 	aml_dtv_demod {
@@ -693,7 +689,6 @@
 			>;
 
 		spectrum = <1>;
-		cma_flag = <1>;
 		cma_mem_size = <40>; // MB
 	};
 
@@ -1258,29 +1253,36 @@
 	 ***************************************************/
 	//clock-range = <334 667>;
 	/***************************************************
-	 * en_4k: t5w support 4k
+	 * en_4k: disable 4K
 	 ***************************************************/
-	en_4k = <1>;
-	keep_dec_vf = <2>;
-	po_fmt = <6>;
+	en_4k = <0>;
+	//keep_dec_vf = <2>;
+	po_fmt = <0>;
 	/***************************************************
 	 * post_nub: default is 11 (T7/T3/SC2/S4 new path)
-	 * local 7*4075520 = 28
-	 * post 11*5222400 = 56 //??
+	 * local 5*4075520 = 20
+	 * post 9*5222400 = 47
 	 ***************************************************/
-	post_nub = <11>;
+	post_nub = <9>;
 	/***************************************************
 	 * 0:not support
 	 * bit 0: for 4k
 	 * bit 1: for 1080p
 	 ***************************************************/
-	alloc_sct = <1>;
+	alloc_sct = <0>;
+	en_dat = <0>;
 	/***************************************************
 	 * hf: default is 0 (T7/T3/SC2/S4 new path)
 	 * 0:not enable;
 	 * 1: enable
 	 ***************************************************/
-	hf = <0>;
+	//hf = <0>;
+	afbce_loss_en = <1>;
+	/***************************************************
+	 * loss mode for di out (T5w)
+	 * 0:not set loss mode for di out;
+	 * 1:1:check the loss flag in vf and set for di
+	 ***************************************************/
 };/* end of multi-di */
 
 &i2c0 {
@@ -1431,9 +1433,9 @@
 
 &amlvecm {
 	status = "okay";
-	gamma_en = <1>;/*1:enabel ;0:disable*/
-	wb_en = <1>;/*1:enabel ;0:disable*/
-	cm_en = <1>;/*1:enabel ;0:disable*/
+	gamma_en = <1>;/*1:enable ;0:disable*/
+	wb_en = <1>;/*1:enable ;0:disable*/
+	cm_en = <1>;/*1:enable ;0:disable*/
 	wb_sel = <0>;/*1:mtx ;0:gainoff*/
 	vlock_en = <1>;/*1:enable;0:disable*/
 	vlock_mode = <0x8>;
@@ -1465,7 +1467,7 @@
 	 * total size:(27.5+1.5)x buffernumber
 	 */
 	cma_size = <300>;
-	frame_buff_num = <11>;
+	frame_buff_num = <8>;
 };
 
 &vdin1 {
@@ -1489,7 +1491,7 @@
 	status = "okay";
 	display_size_default = <1920 1080 1920 2160 32>;
 	mem_size = <0x00800000 0x1980000 0x100000 0x100000>;
-	logo_addr = "0x3f800000";
+	logo_addr = "0x2f800000";
 	/* display_device_cnt = <2>; */ /* for dual screen upport */
 	mem_alloc = <0>;
 	pxp_mode = <0>; /** 0:normal mode 1:pxp mode */
@@ -1586,6 +1588,44 @@
 			output-low;
 		};
 	};
+	ST6451D06_3_pins: ST6451D06_3_pin {
+		mux {
+			groups = "tcon_1","tcon_2","tcon_3",
+				"tcon_4","tcon_5","tcon_6",
+				"tcon_9","tcon_10","tcon_11",
+				"tcon_14","tcon_lock";
+			function = "tcon";
+		};
+	};
+	ST6451D06_3_off_pins: ST6451D06_3_off_pin {
+		mux {
+			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
+				"GPIOH_4","GPIOH_5","GPIOH_6",
+				"GPIOH_9","GPIOH_10","GPIOH_11",
+				"GPIOH_14","GPIOH_0";
+				function = "gpio_periphs";
+			input-enable;
+		};
+	};
+	ST5461D18_2_pins: ST5461D18_2_pin {
+		mux {
+			groups = "tcon_1","tcon_2","tcon_3",
+				"tcon_4","tcon_5","tcon_6",
+				"tcon_9","tcon_10","tcon_11",
+				"tcon_14","tcon_lock";
+			function = "tcon";
+		};
+	};
+	ST5461D18_2_off_pins: ST5461D18_2_off_pin {
+		mux {
+			groups = "GPIOH_1","GPIOH_2","GPIOH_3",
+				"GPIOH_4","GPIOH_5","GPIOH_6",
+				"GPIOH_9","GPIOH_10","GPIOH_11",
+				"GPIOH_14","GPIOH_0";
+				function = "gpio_periphs";
+			input-enable;
+		};
+	};
 };
 
 &vdac {
@@ -1633,7 +1673,7 @@
 };
 
 &spicc0 {	//for TCON/SPINOR
-	status = "okay";
+	status = "disabled";
 	pinctrl-names = "default";
 	pinctrl-0 = <&spicc0_pins_h>;
 	cs-gpios = <&gpio GPIOH_8 GPIO_ACTIVE_HIGH>;

@@ -130,6 +130,7 @@ struct aml_tdm {
 	int pcpd_monitor_enable;
 	struct regulator *regulator_vcc3v3;
 	struct regulator *regulator_vcc5v;
+	int suspend_clk_off;
 };
 
 #define TDM_BUFFER_BYTES (512 * 1024)
@@ -354,6 +355,10 @@ static unsigned int aml_mpll_mclk_ratio(unsigned int freq)
 		if (mpll_freq > AML_MPLL_FREQ_MIN)
 			break;
 	}
+	//Currently for tdmB/spdifab with the samesource while the tdma running
+	//tdmb sysclk 12288000  tdma sysclk 8192000
+	if (freq % 8000 == 0)
+		ratio = 491520000 / freq;
 
 	return ratio;
 }
@@ -366,7 +371,7 @@ static int aml_set_tdm_mclk(struct aml_tdm *p_tdm, unsigned int freq)
 	p_tdm->setting.sysclk = freq;
 
 	clk_name = (char *)__clk_get_name(p_tdm->clk);
-	if (!strcmp(clk_name, "hifipll") || !strcmp(clk_name, "t5_hifi_pll"))
+	if (!strcmp(clk_name, "hifi_pll") || !strcmp(clk_name, "t5_hifi_pll"))
 		if (p_tdm->syssrc_clk_rate)
 			mpll_freq = p_tdm->syssrc_clk_rate;
 		else
@@ -952,7 +957,7 @@ static void tdm_sharebuffer_trigger(struct aml_tdm *p_tdm,
 	if (ops) {
 		int reenable = 0;
 
-		if (channels > 2)
+		if (channels > 2 && !(p_tdm->fddr->chipinfo->chnum_sync))
 			reenable = 1;
 		ops->trigger(cmd,
 			p_tdm->samesource_sel,
@@ -1002,7 +1007,7 @@ static void tdm_sharebuffer_reset(struct aml_tdm *p_tdm, int channels)
 		return;
 
 	ops = get_samesrc_ops(p_tdm->samesource_sel);
-	if (ops && channels > 2)
+	if (ops && channels > 2 && !(p_tdm->fddr->chipinfo->chnum_sync))
 		ops->reset(p_tdm->samesource_sel - 3,
 				offset);
 }
@@ -1741,7 +1746,7 @@ static int aml_set_default_tdm_clk(struct aml_tdm *p_tdm)
 		p_tdm->chipinfo->use_vadtop);
 
 	clk_name = (char *)__clk_get_name(p_tdm->clk);
-	if (!strcmp(clk_name, "hifipll") || !strcmp(clk_name, "t5_hifi_pll")) {
+	if (!strcmp(clk_name, "hifi_pll") || !strcmp(clk_name, "t5_hifi_pll")) {
 		if (p_tdm->syssrc_clk_rate)
 			pll = p_tdm->syssrc_clk_rate;
 		else
@@ -2009,7 +2014,7 @@ static int aml_tdm_platform_probe(struct platform_device *pdev)
 		p_tdm->pcpd_monitor_src = platform_get_drvdata(dev_src);
 		pr_info("%s(), pcpd src found\n", __func__);
 	}
-	ret = of_property_read_u32(dev->of_node, "scrc-clk-freq",
+	ret = of_property_read_u32(dev->of_node, "src-clk-freq",
 				   &p_tdm->syssrc_clk_rate);
 	if (ret < 0)
 		p_tdm->syssrc_clk_rate = 0;
@@ -2023,6 +2028,12 @@ static int aml_tdm_platform_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Can't retrieve dai-tdm-clk-sel\n");
 		return -ENXIO;
+	}
+
+	ret = of_property_read_u32(node, "suspend-clk-off",
+			&p_tdm->suspend_clk_off);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "Can't retrieve suspend-clk-off\n");
 	}
 
 	/* default no same source */
@@ -2228,7 +2239,7 @@ static int aml_tdm_platform_suspend(struct platform_device *pdev,
 {
 	struct aml_tdm *p_tdm = dev_get_drvdata(&pdev->dev);
 
-	if (p_tdm->chipinfo->regulator) {
+	if (p_tdm->chipinfo->regulator || (p_tdm->suspend_clk_off && !is_pm_s2idle_mode())) {
 		if (!IS_ERR(p_tdm->mclk2pad)) {
 			while (__clk_is_enabled(p_tdm->mclk2pad))
 				clk_disable_unprepare(p_tdm->mclk2pad);
@@ -2269,7 +2280,7 @@ static int aml_tdm_platform_resume(struct platform_device *pdev)
 	out_lanes = pop_count(p_tdm->setting.lane_mask_out);
 	in_lanes = pop_count(p_tdm->setting.lane_mask_in);
 
-	if (p_tdm->chipinfo->regulator) {
+	if (p_tdm->chipinfo->regulator || (p_tdm->suspend_clk_off && !is_pm_s2idle_mode())) {
 
 		audiobus_write(EE_AUDIO_CLK_GATE_EN0, 0xffffffff);
 		audiobus_update_bits(EE_AUDIO_CLK_GATE_EN1, 0x7, 0x7);

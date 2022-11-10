@@ -8,14 +8,14 @@
 
 #ifdef CONFIG_AMLOGIC_MEDIA_CODEC_MM
 int codec_mm_module_init(void);
-int secmem_init(void);
+int dmabuf_manage_init(void);
 #else
 static inline int codec_mm_module_init(void)
 {
 	return 0;
 }
 
-static inline int secmem_init(void)
+static inline int dmabuf_manage_init(void)
 {
 	return 0;
 }
@@ -620,6 +620,20 @@ int __init aml_dtvdemod_init(void);
 static int aml_dtvdemod_init(void)
 {
 	return 0;
+}
+#endif
+
+#ifdef CONFIG_AMLOGIC_MEDIA_MINFO
+int __init minfo_init(void);
+void __exit minfo_exit(void);
+#else
+static int minfo_init(void)
+{
+	return 0;
+}
+
+void __exit minfo_exit(void)
+{
 }
 #endif
 
